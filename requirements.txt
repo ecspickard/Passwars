@@ -8,3 +8,6 @@ pyjwt==2.14.0
 python-socketio==5.10.0
 python-multipart==0.0.6
 pydantic==2.6.0
+email-validator==2.1.0
+cryptography==42.0.5
+requests==2.31.0

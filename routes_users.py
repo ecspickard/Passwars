@@ -1,18 +1,21 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy.orm import Session
 from sqlalchemy import func, exc
 from typing import List
+from datetime import datetime
 from database import get_db
 from models import User, UserPassword, PasswordBank
 from schemas import (
     PasswordAddRequest, PasswordResponse, PasswordBankResponse,
-    PlayerResponse, LeaderboardResponse, UserResponse
+    PlayerResponse, LeaderboardResponse, UserResponse, SecretRevealResponse,
+    ChessUsernameStartRequest, ChessUsernameStartResponse, ChessUsernameVerifyResponse
 )
-from utils import decode_token
+from utils import decode_token, encrypt_secret, decrypt_secret, generate_verification_code
+from chess_api import chess_user_exists, verify_ownership_via_location
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
-def get_current_user(token: str, db: Session = Depends(get_db)) -> User:
+def get_current_user(token: str = Header(None, alias="Authorization"), db: Session = Depends(get_db)) -> User:
     """Get current user from JWT token"""
     if not token or not token.startswith("Bearer "):
         raise HTTPException(
@@ -43,17 +46,18 @@ def get_current_user(token: str, db: Session = Depends(get_db)) -> User:
 @router.post("/passwords", response_model=PasswordResponse, status_code=status.HTTP_201_CREATED)
 def add_password(
     request: PasswordAddRequest,
-    authorization: str = None,
+    authorization: str = Header(None),
     db: Session = Depends(get_db)
 ):
-    """Add a password offering"""
+    """Add a password offering. The secret is encrypted before it touches the database."""
     
     current_user = get_current_user(authorization, db)
     
     try:
         new_password = UserPassword(
             user_id=current_user.id,
-            service_name=request.service_name
+            service_name=request.service_name,
+            secret_value=encrypt_secret(request.secret_value)
         )
         db.add(new_password)
         db.commit()
@@ -81,7 +85,7 @@ def get_players(db: Session = Depends(get_db)):
 
 @router.get("/password-bank", response_model=List[PasswordBankResponse])
 def get_password_bank(
-    authorization: str = None,
+    authorization: str = Header(None),
     db: Session = Depends(get_db)
 ):
     """Get current user's collected password bank"""
@@ -144,10 +148,127 @@ def get_user_profile(user_id: int, db: Session = Depends(get_db)):
 
 @router.get("/me", response_model=UserResponse)
 def get_current_user_info(
-    authorization: str = None,
+    authorization: str = Header(None),
     db: Session = Depends(get_db)
 ):
     """Get current user information"""
     
     current_user = get_current_user(authorization, db)
     return UserResponse.from_orm(current_user)
+
+
+@router.get("/passwords/{password_id}/reveal", response_model=SecretRevealResponse)
+def reveal_offering_secret(
+    password_id: int,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Decrypt and return one of the current user's own offered secrets."""
+
+    current_user = get_current_user(authorization, db)
+
+    offering = db.query(UserPassword).filter(
+        UserPassword.id == password_id,
+        UserPassword.user_id == current_user.id
+    ).first()
+
+    if not offering:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offering not found")
+
+    return SecretRevealResponse(
+        id=offering.id,
+        service_name=offering.service_name,
+        secret_value=decrypt_secret(offering.secret_value)
+    )
+
+
+@router.get("/password-bank/{entry_id}/reveal", response_model=SecretRevealResponse)
+def reveal_bank_secret(
+    entry_id: int,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Decrypt and return a secret the current user has won into their bank."""
+
+    current_user = get_current_user(authorization, db)
+
+    entry = db.query(PasswordBank).filter(
+        PasswordBank.id == entry_id,
+        PasswordBank.user_id == current_user.id
+    ).first()
+
+    if not entry:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Password bank entry not found")
+
+    return SecretRevealResponse(
+        id=entry.id,
+        service_name=entry.service_name,
+        secret_value=decrypt_secret(entry.secret_value)
+    )
+
+
+@router.post("/chess-username/start", response_model=ChessUsernameStartResponse)
+def start_chess_username_verification(
+    request: ChessUsernameStartRequest,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Step 1 of linking a Chess.com account: confirm the username exists, then
+    hand back a one-time code for the user to paste into their Chess.com
+    profile's "Location" field so ownership can be confirmed in step 2.
+    """
+
+    current_user = get_current_user(authorization, db)
+
+    if not chess_user_exists(request.chess_username):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No Chess.com account found with that username"
+        )
+
+    code = generate_verification_code()
+    current_user.chess_username = request.chess_username
+    current_user.chess_verification_code = code
+    current_user.chess_verified_at = None
+    db.commit()
+
+    return ChessUsernameStartResponse(
+        chess_username=request.chess_username,
+        verification_code=code,
+        instructions=(
+            f"Paste '{code}' into the Location field of your Chess.com profile, "
+            "then call /chess-username/verify. You can remove it afterward."
+        )
+    )
+
+
+@router.post("/chess-username/verify", response_model=ChessUsernameVerifyResponse)
+def verify_chess_username(
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Step 2: confirm the verification code is present on the linked Chess.com profile."""
+
+    current_user = get_current_user(authorization, db)
+
+    if not current_user.chess_username or not current_user.chess_verification_code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Start chess-username verification first"
+        )
+
+    verified = verify_ownership_via_location(
+        current_user.chess_username, current_user.chess_verification_code
+    )
+
+    if verified:
+        current_user.chess_verified_at = datetime.utcnow()
+        current_user.chess_verification_code = None
+        db.commit()
+
+    return ChessUsernameVerifyResponse(
+        chess_username=current_user.chess_username,
+        verified=verified,
+        verified_at=current_user.chess_verified_at
+    )

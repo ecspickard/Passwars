@@ -14,6 +14,13 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
+    # Chess.com account link. chess_verification_code holds the one-time code
+    # issued during linking and is cleared once verified; chess_verified_at
+    # is null until the ownership check (see chess_api.py) succeeds.
+    chess_username = Column(String(50), nullable=True, index=True)
+    chess_verification_code = Column(String(20), nullable=True)
+    chess_verified_at = Column(DateTime, nullable=True)
+
     # Relationships
     password_offerings = relationship("UserPassword", back_populates="user")
     password_bank = relationship("PasswordBank", back_populates="user")
@@ -30,6 +37,10 @@ class UserPassword(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     service_name = Column(String(100), nullable=False)
+    # Encrypted at rest (see utils.encrypt_secret/decrypt_secret) - only ever
+    # decrypted on-demand via the reveal endpoint, never returned as plaintext
+    # by default in any response.
+    secret_value = Column(String(500), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
     # Unique constraint: user can only offer each service once
@@ -48,6 +59,9 @@ class PasswordBank(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     service_name = Column(String(100), nullable=False)
+    # Copied (still encrypted) from the loser's UserPassword.secret_value at
+    # the moment the challenge completes - see challenge_service.py.
+    secret_value = Column(String(500), nullable=False)
     collected_from = Column(Integer, ForeignKey("users.id"), nullable=True)
     collected_at = Column(DateTime, server_default=func.now())
 
@@ -70,6 +84,11 @@ class Challenge(Base):
     challenger_service = Column(String(100), nullable=False)
     defender_service = Column(String(100), nullable=False)
     status = Column(String(20), default="pending")  # pending, accepted, rejected, completed
+    accepted_at = Column(DateTime, nullable=True)  # bounds the Chess.com game search window
+    # How the challenge's result was determined: "auto" (matched to a
+    # Chess.com game via the public API) or "self_reported" (players
+    # confirmed the outcome themselves). Null until completed.
+    result_source = Column(String(20), nullable=True)
     winner_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     completed_at = Column(DateTime, nullable=True)

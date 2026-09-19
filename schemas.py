@@ -23,6 +23,8 @@ class UserResponse(BaseModel):
     username: str
     email: str
     created_at: datetime
+    chess_username: Optional[str] = None
+    chess_verified_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -40,6 +42,7 @@ class UserProfileResponse(BaseModel):
 # Password Schemas
 class PasswordAddRequest(BaseModel):
     service_name: str
+    secret_value: str  # the actual wagered secret; encrypted before storage
 
 class PasswordResponse(BaseModel):
     id: int
@@ -58,6 +61,13 @@ class PasswordBankResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class SecretRevealResponse(BaseModel):
+    """Returned only by the reveal-on-demand endpoints - never embedded in
+    the plain list/bank responses above."""
+    id: int
+    service_name: str
+    secret_value: str
 
 # Player List Schemas
 class PlayerResponse(BaseModel):
@@ -87,7 +97,10 @@ class ChallengeResponse(BaseModel):
     defender_service: str
     status: str
     winner_id: Optional[int]
+    result_source: Optional[str]
     created_at: datetime
+    accepted_at: Optional[datetime]
+    completed_at: Optional[datetime]
 
     class Config:
         from_attributes = True
@@ -117,3 +130,17 @@ class GameMoveResponse(BaseModel):
 class GameResultRequest(BaseModel):
     challenge_id: int
     winner_id: int
+
+# Chess.com Account Linking Schemas
+class ChessUsernameStartRequest(BaseModel):
+    chess_username: str
+
+class ChessUsernameStartResponse(BaseModel):
+    chess_username: str
+    verification_code: str
+    instructions: str
+
+class ChessUsernameVerifyResponse(BaseModel):
+    chess_username: str
+    verified: bool
+    verified_at: Optional[datetime]
