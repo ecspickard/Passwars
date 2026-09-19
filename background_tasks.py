@@ -69,7 +69,8 @@ async def _expire_stale_pending_challenges(db):
     """Pending challenges older than the TTL auto-expire, so an unanswered
     invite doesn't block the challenger's offering from being deleted or
     reused forever."""
-    cutoff = datetime.utcnow() - PENDING_CHALLENGE_TTL
+    from sqlalchemy import func
+    cutoff = func.now() - PENDING_CHALLENGE_TTL
     stale = db.query(Challenge).filter(
         Challenge.status == "pending",
         Challenge.created_at < cutoff,

@@ -264,8 +264,8 @@ export default function ChallengeDetail() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <PageHeading
-          title={`Challenge #${challenge.id}`}
-          description={`${nameOf(challenge.challenger_id)} vs ${nameOf(challenge.defender_id)}, played on Chess.com.`}
+          title={`${nameOf(challenge.challenger_id)} vs ${nameOf(challenge.defender_id)}`}
+          description={`Challenge played on Chess.com`}
         />
         <span className={`rounded-panel border px-2.5 py-1 text-xs font-medium ${badge.className}`}>
           {badge.text}
