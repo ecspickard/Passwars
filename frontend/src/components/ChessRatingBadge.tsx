@@ -34,12 +34,14 @@ export function ChessRatingBadge({ username }: { username?: string | null }) {
   }
 
   if (result.status === "ok") {
+    // macOS often renders the Unicode knight slightly lower than Windows
+    const isMac = typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('mac');
     return (
       <span
         className={`${BADGE} border-gold-500/40 text-steel-400`}
         title={`${result.format} rating for ${username} on Chess.com`}
       >
-        <span aria-hidden className="text-gold-400">
+        <span aria-hidden className={`text-gold-400 ${isMac ? '-translate-y-0.5' : ''}`}>
           ♞
         </span>
         <span className="font-medium text-gold-400">{result.rating}</span>

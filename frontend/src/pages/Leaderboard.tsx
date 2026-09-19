@@ -10,7 +10,11 @@ import {
 } from "../lib/leaderboard";
 import type { LeaderboardEntry } from "../lib/types";
 
-const MEDAL: Record<number, string> = { 1: "🥇", 2: "🥈", 3: "🥉" };
+const CHESS_RANK: Record<number, { icon: string; className: string }> = {
+  1: { icon: "♔", className: "text-gold-400 text-xl drop-shadow-sm inline-block -translate-y-px" },
+  2: { icon: "♕", className: "text-gold-400 text-lg inline-block -translate-y-px" },
+  3: { icon: "♗", className: "text-gold-500 text-lg inline-block -translate-y-px" },
+};
 
 export default function Leaderboard() {
   const { user } = useAuth();
@@ -85,16 +89,15 @@ export default function Leaderboard() {
                 {entries.map((entry, i) => {
                   const rank = i + 1;
                   const isMe = user?.id === entry.id;
-                  const medal = MEDAL[rank];
+                  const chessRank = CHESS_RANK[rank];
                   return (
                     <tr key={entry.id} className={isMe ? "bg-gold-500/10" : undefined}>
                       <td className="px-4 py-3 font-display text-parchment-50">
-                        {medal ? (
-                          <span aria-hidden>{medal}</span>
-                        ) : (
-                          <span className="text-steel-400">#{rank}</span>
+                        <span className="text-steel-400 mr-2 font-ui text-sm">#{rank}</span>
+                        {chessRank && (
+                          <span aria-hidden className={chessRank.className} title={`Rank ${rank}`}>{chessRank.icon}</span>
                         )}
-                        {medal && <span className="sr-only">Rank {rank}</span>}
+                        {chessRank && <span className="sr-only">Rank {rank}</span>}
                       </td>
                       <td className="px-4 py-3">
                         <Link
