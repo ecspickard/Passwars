@@ -1,0 +1,105 @@
+@import "tailwindcss";
+
+/*
+  Passwars design tokens.
+  Palette: a chess board rendered in security-vault materials —
+  warm parchment squares, near-black ink, a worn gold trophy accent,
+  brick-red for risk/decline, and a muted felt green for a win.
+*/
+@theme {
+  --font-display: "Spectral", "Iowan Old Style", "Georgia", serif;
+  --font-ui: "Space Grotesk", "Inter", system-ui, sans-serif;
+
+  --color-ink-950: #14130f;
+  --color-ink-900: #1c1a14;
+  --color-ink-800: #29261d;
+  --color-ink-700: #3a3527;
+
+  --color-parchment-50: #fbf8f1;
+  --color-parchment-100: #f4eddc;
+  --color-parchment-200: #ebe0c6;
+  --color-parchment-300: #ddcca4;
+
+  --color-gold-400: #d9b65c;
+  --color-gold-500: #bd9435;
+  --color-gold-600: #96742a;
+
+  --color-signal-500: #a63d33;
+  --color-signal-600: #8a3128;
+
+  --color-felt-500: #3f6b52;
+  --color-felt-600: #315641;
+
+  --color-steel-400: #8791a1;
+  --color-steel-500: #5b6472;
+  --color-steel-600: #454d59;
+
+  --spacing-gutter: 1.5rem;
+
+  --radius-panel: 0.375rem;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-ink-950 text-parchment-100 font-ui antialiased;
+    background-image:
+      linear-gradient(135deg, rgba(217, 182, 92, 0.05) 0%, transparent 40%),
+      repeating-conic-gradient(
+        from 0deg,
+        rgba(244, 237, 220, 0.028) 0% 25%,
+        transparent 0% 50%
+      );
+    background-size: auto, 64px 64px;
+  }
+
+  h1, h2, h3, h4 {
+    @apply font-display text-parchment-50;
+  }
+
+  ::selection {
+    background-color: var(--color-gold-500);
+    color: var(--color-ink-950);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-gold-400);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply bg-ink-900/80 border border-ink-700 rounded-panel;
+  }
+
+  .btn-gold {
+    @apply inline-flex items-center justify-center gap-2 rounded-panel bg-gold-500
+      px-4 py-2 font-ui font-medium text-ink-950 transition-colors
+      hover:bg-gold-400 focus-visible:outline-gold-400 disabled:opacity-50
+      disabled:pointer-events-none;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-panel border
+      border-ink-700 bg-transparent px-4 py-2 font-ui text-parchment-100
+      transition-colors hover:border-gold-500 hover:text-gold-400;
+  }
+
+  .btn-signal {
+    @apply inline-flex items-center justify-center gap-2 rounded-panel border
+      border-signal-500 bg-transparent px-4 py-2 font-ui text-signal-500
+      transition-all duration-300 hover:bg-signal-500 hover:text-parchment-50
+      hover:border-transparent focus-visible:outline-signal-500 disabled:opacity-50
+      disabled:pointer-events-none;
+  }
+
+  .input-field {
+    @apply w-full rounded-panel border border-ink-700 bg-ink-950/60 px-3 py-2
+      text-parchment-50 placeholder:text-steel-500 focus:border-gold-500
+      focus:outline-none;
+  }
+}

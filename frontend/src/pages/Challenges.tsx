@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { ChallengeModal } from "../components/ChallengeModal";
 import { PageHeading } from "../components/PageHeading";
 import { PlayerCard, type Outstanding } from "../components/PlayerCard";
@@ -15,6 +15,7 @@ const REFRESH_EVENTS = ["challenge_received", "challenge_accepted", "challenge_d
 export default function Challenges() {
   const { user } = useAuth();
   const { subscribe, send } = useWebSocket();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [players, setPlayers] = useState<Player[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -76,6 +77,29 @@ export default function Challenges() {
     () => (players ?? []).filter((p) => p.id !== myId && p.services.length > 0),
     [players, myId],
   );
+
+  // Deep-link support: a link like /challenges?opponent=42 (from the
+  // leaderboard or a profile page) opens the challenge modal pre-filled
+  // with that player, once the player list has loaded. The param is then
+  // cleared so closing/reopening the modal, or any later re-render, doesn't
+  // reopen it again.
+  useEffect(() => {
+    const opponentParam = searchParams.get("opponent");
+    if (!opponentParam || players === null) return;
+
+    const opponentId = Number(opponentParam);
+    const target = eligible.find((p) => p.id === opponentId);
+    if (target) setChallenging(target);
+
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("opponent");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [players, eligible, searchParams, setSearchParams]);
 
   const visible = useMemo(
     () => filterAndSortPlayers(eligible, { service: serviceFilter, sort }),

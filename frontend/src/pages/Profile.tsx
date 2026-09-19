@@ -1,13 +1,25 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { PageHeading } from "../components/PageHeading";
+import { useAuth } from "../context/AuthContext";
+import { getRankForUser, type RankInfo } from "../lib/leaderboard";
 import { getUserProfile, type UserProfile } from "../lib/profile";
+
+const MEDAL: Record<number, string> = { 1: "🥇", 2: "🥈", 3: "🥉" };
 
 export default function Profile() {
   const { id } = useParams<{ id: string }>();
+  const { user: viewer } = useAuth();
+
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Rank is fetched separately from the rest of the profile: it comes from
+  // a different endpoint (the leaderboard has no per-user lookup), and a
+  // slow/failed rank fetch shouldn't block or break the rest of the page.
+  const [rank, setRank] = useState<RankInfo | null>(null);
+  const [rankLoading, setRankLoading] = useState(true);
 
   useEffect(() => {
     if (!id) return;
@@ -25,6 +37,27 @@ export default function Profile() {
           setError("Failed to load profile.");
           setLoading(false);
         }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  useEffect(() => {
+    const numericId = Number(id);
+    if (!id || !Number.isFinite(numericId)) return;
+    let cancelled = false;
+    setRankLoading(true);
+    getRankForUser(numericId)
+      .then((result) => {
+        if (!cancelled) setRank(result);
+      })
+      .catch(() => {
+        // Rank is a nicety on top of the profile - fail silently and just
+        // omit the panel rather than showing an error for it.
+      })
+      .finally(() => {
+        if (!cancelled) setRankLoading(false);
       });
     return () => {
       cancelled = true;
@@ -54,6 +87,9 @@ export default function Profile() {
       </div>
     );
   }
+
+  const isOwnProfile = viewer?.id === profile.id;
+  const canChallenge = !isOwnProfile && Boolean(viewer) && profile.offerings.length > 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -88,7 +124,46 @@ export default function Profile() {
             </p>
           )}
         </div>
+        {canChallenge && (
+          <Link
+            to={`/challenges?opponent=${profile.id}`}
+            className="btn-gold shrink-0 self-center sm:self-start"
+          >
+            Challenge {profile.username}
+          </Link>
+        )}
       </section>
+
+      {/* Leaderboard standing */}
+      {!rankLoading && rank && (
+        <section className="panel flex flex-wrap items-center justify-between gap-4 p-5">
+          <div className="flex items-center gap-3">
+            <span className="font-display text-3xl text-gold-400" aria-hidden>
+              {MEDAL[rank.rank] ?? `#${rank.rank}`}
+            </span>
+            <div>
+              <p className="font-display text-lg text-parchment-50">
+                Rank {rank.rank} of {rank.totalPlayers}
+              </p>
+              <p className="text-sm text-steel-400">
+                {rank.entry.password_count}{" "}
+                {rank.entry.password_count === 1 ? "password" : "passwords"} collected
+              </p>
+            </div>
+          </div>
+          <Link to="/leaderboard" className="btn-ghost text-sm">
+            View full leaderboard
+          </Link>
+        </section>
+      )}
+      {!rankLoading && !rank && (
+        <section className="panel flex items-center justify-between gap-4 p-5 text-sm text-steel-400">
+          <p>Not on the leaderboard yet.</p>
+          <Link to="/leaderboard" className="btn-ghost text-sm">
+            View leaderboard
+          </Link>
+        </section>
+      )}
 
       {profile.chess_stats && Object.keys(profile.chess_stats).length > 0 && (
         <section>
