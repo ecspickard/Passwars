@@ -20,10 +20,10 @@ class User(Base):
     chess_verified_at = Column(DateTime, nullable=True)
 
     # Relationships - specify foreign_keys for PasswordBank since it has two FK to users
-    password_offerings = relationship("UserPassword", back_populates="user")
-    password_bank = relationship("PasswordBank", back_populates="user", foreign_keys="PasswordBank.user_id")
-    challenges_as_challenger = relationship("Challenge", foreign_keys="Challenge.challenger_id")
-    challenges_as_defender = relationship("Challenge", foreign_keys="Challenge.defender_id")
+    password_offerings = relationship("UserPassword", back_populates="user", cascade="all, delete-orphan")
+    password_bank = relationship("PasswordBank", back_populates="user", foreign_keys="PasswordBank.user_id", cascade="all, delete-orphan")
+    challenges_as_challenger = relationship("Challenge", foreign_keys="Challenge.challenger_id", cascade="all, delete-orphan")
+    challenges_as_defender = relationship("Challenge", foreign_keys="Challenge.defender_id", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, username={self.username})>"
@@ -53,7 +53,7 @@ class PasswordBank(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     service_name = Column(String(100), nullable=False)
     secret_value = Column(String(255), nullable=False)
-    collected_from = Column(Integer, ForeignKey("users.id"), nullable=True)
+    collected_from = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     collected_at = Column(DateTime, server_default=func.now())
 
     __table_args__ = (UniqueConstraint('user_id', 'service_name', name='unique_user_collected_service'),)
