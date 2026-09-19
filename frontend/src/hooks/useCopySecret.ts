@@ -39,6 +39,11 @@ export function useCopySecret(serviceName: string, fetchSecret: () => Promise<st
 
     try {
       const secret = await fetchSecret();
+      // api.get<T> only casts the JSON, so if the server's field name ever
+      // drifts from what the frontend expects, `secret` is undefined and
+      // writeText(undefined) would silently copy the string "undefined".
+      // Refuse to copy anything that isn't a real, non-empty string.
+      if (typeof secret !== "string" || !secret) throw new Error("No password returned");
       await navigator.clipboard.writeText(secret);
 
       showToast(

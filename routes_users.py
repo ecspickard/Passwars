@@ -12,6 +12,7 @@ from schemas import (
 )
 from utils import decode_token, encrypt_password, decrypt_password, verify_password, hash_password
 from chess_api import chess_user_exists, verify_ownership_via_location
+import traceback
 import uuid
 from datetime import datetime
 
@@ -203,17 +204,26 @@ def reveal_password(
     ip_address = request.client.host if request else None
     log_password_access(db, current_user.id, password_id, "revealed", ip_address)
     
-    # Decrypt and return
+    # Decrypt. Only the decrypt call is inside the try, and the real error is
+    # printed to the server console (never the secret itself) so a failure
+    # here can be diagnosed instead of showing up as a bare 500.
     try:
         plaintext = decrypt_password(pwd.secret_value)
-        return {
-            "service_name": pwd.service_name,
-            "password": plaintext,
-            "collected_from": pwd.collected_from,
-            "collected_at": pwd.collected_at
-        }
-    except Exception as e:
+    except Exception:
+        print(f"[reveal_password] decrypt failed for bank entry {password_id} "
+              f"(secret_value length: {len(pwd.secret_value or '')})")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail="Failed to decrypt password")
+
+    # Same response shape as the vault's reveal endpoint (frontend reads
+    # `secret_value`; this used to be returned as `password`).
+    return {
+        "id": pwd.id,
+        "service_name": pwd.service_name,
+        "secret_value": plaintext,
+        "collected_from": pwd.collected_from,
+        "collected_at": pwd.collected_at,
+    }
 
 @router.get("/leaderboard", response_model=List[LeaderboardResponse])
 def get_leaderboard(db: Session = Depends(get_db), limit: int = 50):
