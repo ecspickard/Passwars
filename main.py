@@ -1,16 +1,20 @@
-from fastapi import FastAPI, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
-from sqlalchemy import func, update
+import asyncio
 from datetime import datetime
-import os
+from typing import Dict, Optional
 
-from database import init_db, get_db, SessionLocal
-from models import Challenge, PasswordBank, User, UserPassword
-from utils import encrypt_password
+from fastapi import FastAPI, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
+
+from database import init_db, SessionLocal
+from models import Challenge
 from routes_auth import router as auth_router
 from routes_users import router as users_router
 from routes_challenges import router as challenges_router
+from connection_manager import manager  # shared with background_tasks.py
+from background_tasks import poll_accepted_challenges
+from challenge_service import complete_challenge
+from chess_api import find_game_result
 
 # Initialize database
 init_db()
@@ -31,47 +35,28 @@ app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(challenges_router)
 
+
+@app.on_event("startup")
+async def start_background_poller():
+    # Resolves accepted challenges from Chess.com and expires stale pending ones.
+    asyncio.create_task(poll_accepted_challenges())
+
+
 # Health check
 @app.get("/api/health")
 def health_check():
     return {"status": "Server is running"}
 
-# WebSocket connection manager
-from typing import List, Dict
-from fastapi import WebSocket
 
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: Dict[int, WebSocket] = {}
-        self.active_games: Dict[int, dict] = {}
+# Manual self-reports awaiting the opponent's matching report:
+# challenge_id -> {user_id: reported winner id, or None for a draw}.
+# In memory only: a server restart clears them and players simply report again.
+pending_reports: Dict[int, Dict[int, Optional[int]]] = {}
 
-    async def connect(self, user_id: int, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections[user_id] = websocket
 
-    def disconnect(self, user_id: int):
-        if user_id in self.active_connections:
-            del self.active_connections[user_id]
+def _has_verified_chess(user) -> bool:
+    return bool(user.chess_username and user.chess_verified_at)
 
-    async def send_to_user(self, user_id: int, message: dict):
-        print(f"[ws] send_to_user({user_id}), connected users: {list(self.active_connections.keys())}")
-        if user_id in self.active_connections:
-            try:
-                await self.active_connections[user_id].send_json(message)
-                print(f"[ws] message sent to user {user_id}: {message.get('type')}")
-            except Exception as e:
-                print(f"Error sending message to user {user_id}: {e}")
-        else:
-            print(f"[ws] user {user_id} not connected, message dropped: {message.get('type')}")
-
-    async def broadcast(self, message: dict):
-        for connection in self.active_connections.values():
-            try:
-                await connection.send_json(message)
-            except Exception as e:
-                print(f"Error broadcasting message: {e}")
-
-manager = ConnectionManager()
 
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(user_id: int, websocket: WebSocket):
@@ -83,160 +68,242 @@ async def websocket_endpoint(user_id: int, websocket: WebSocket):
             event_type = data.get("type")
 
             if event_type == "user_online":
-                # User came online
                 print(f"User {user_id} is online")
 
             elif event_type == "send_challenge":
-                # Send challenge to defender
                 challenger_id = data.get("challenger_id")
                 defender_id = data.get("defender_id")
                 challenger_service = data.get("challenger_service")
                 defender_service = data.get("defender_service")
 
-                # Create challenge in database
                 db = SessionLocal()
-                challenge = Challenge(
-                    challenger_id=challenger_id,
-                    defender_id=defender_id,
-                    challenger_service=challenger_service,
-                    defender_service=defender_service,
-                    status="pending"
-                )
-                db.add(challenge)
-                db.commit()
-                db.refresh(challenge)
-                db.close()
+                try:
+                    challenge = Challenge(
+                        challenger_id=challenger_id,
+                        defender_id=defender_id,
+                        challenger_service=challenger_service,
+                        defender_service=defender_service,
+                        status="pending",
+                    )
+                    db.add(challenge)
+                    db.commit()
+                    db.refresh(challenge)
+                    challenge_id = challenge.id
+                finally:
+                    db.close()
 
-                # Send notification to defender
                 await manager.send_to_user(
                     defender_id,
                     {
                         "type": "challenge_received",
-                        "challenge_id": challenge.id,
+                        "challenge_id": challenge_id,
                         "challenger_id": challenger_id,
                         "challenger_name": data.get("challenger_name"),
                         "challenger_service": challenger_service,
-                        "defender_service": defender_service
-                    }
+                        "defender_service": defender_service,
+                    },
                 )
 
             elif event_type == "accept_challenge":
-                # Challenge accepted
                 challenge_id = data.get("challenge_id")
-                
+
                 db = SessionLocal()
-                challenge = db.query(Challenge).filter(Challenge.id == challenge_id).first()
-                if challenge:
+                try:
+                    challenge = db.query(Challenge).filter(Challenge.id == challenge_id).first()
+                    # Only the defender can accept, and only while it's pending.
+                    if not challenge or challenge.defender_id != user_id or challenge.status != "pending":
+                        continue
+
                     challenge.status = "accepted"
+                    # Games only count if they finish after this moment.
+                    challenge.accepted_at = datetime.utcnow()
                     db.commit()
-                
-                # Notify challenger
-                await manager.send_to_user(
-                    challenge.challenger_id,
-                    {
-                        "type": "challenge_accepted",
-                        "challenge_id": challenge_id
-                    }
-                )
-                
-                # Notify defender
-                await manager.send_to_user(
-                    challenge.defender_id,
-                    {
-                        "type": "challenge_accepted",
-                        "challenge_id": challenge_id
-                    }
-                )
-                db.close()
+
+                    challenger, defender = challenge.challenger, challenge.defender
+                    challenger_id, defender_id = challenge.challenger_id, challenge.defender_id
+                    # Each player is told their opponent's Chess.com handle.
+                    for uid, opponent in ((challenger_id, defender), (defender_id, challenger)):
+                        await manager.send_to_user(
+                            uid,
+                            {
+                                "type": "challenge_accepted",
+                                "challenge_id": challenge_id,
+                                "opponent_chess_username": (
+                                    opponent.chess_username if _has_verified_chess(opponent) else None
+                                ),
+                            },
+                        )
+                finally:
+                    db.close()
 
             elif event_type == "deny_challenge":
-                # Challenge denied
                 challenge_id = data.get("challenge_id")
-                
+
                 db = SessionLocal()
-                challenge = db.query(Challenge).filter(Challenge.id == challenge_id).first()
-                if challenge:
+                try:
+                    challenge = db.query(Challenge).filter(Challenge.id == challenge_id).first()
+                    if not challenge or challenge.defender_id != user_id or challenge.status != "pending":
+                        continue
+
                     challenge.status = "rejected"
                     db.commit()
-                
-                # Notify challenger
+                    challenger_id = challenge.challenger_id
+                finally:
+                    db.close()
+
                 await manager.send_to_user(
-                    challenge.challenger_id,
-                    {
-                        "type": "challenge_denied",
-                        "challenge_id": challenge_id
-                    }
+                    challenger_id,
+                    {"type": "challenge_denied", "challenge_id": challenge_id},
                 )
-                db.close()
 
             elif event_type == "game_move":
-                # Game move
-                challenge_id = data.get("challenge_id")
-                move = data.get("move")
-                player_id = data.get("player_id")
-
-                # Broadcast move to both players
                 await manager.broadcast(
                     {
                         "type": "game_move",
-                        "challenge_id": challenge_id,
-                        "player_id": player_id,
-                        "move": move
+                        "challenge_id": data.get("challenge_id"),
+                        "player_id": data.get("player_id"),
+                        "move": data.get("move"),
                     }
                 )
 
             elif event_type == "game_end":
-                # Game finished - transfer password to winner
+                # A client reports a Chess.com-detected result. The claim is
+                # re-verified against Chess.com here, and complete_challenge
+                # refuses anything that isn't still 'accepted', so duplicate
+                # events (both players' browsers, or the poller) are harmless.
                 challenge_id = data.get("challenge_id")
                 winner_id = data.get("winner_id")
 
                 db = SessionLocal()
-                challenge = db.query(Challenge).filter(Challenge.id == challenge_id).first()
-                
-                if challenge:
-                    loser_id = challenge.defender_id if winner_id == challenge.challenger_id else challenge.challenger_id
-                    loser_service = challenge.defender_service if winner_id == challenge.challenger_id else challenge.challenger_service
+                try:
+                    challenge = db.query(Challenge).filter(Challenge.id == challenge_id).first()
+                    if not challenge or challenge.status != "accepted":
+                        continue
+                    ids = (challenge.challenger_id, challenge.defender_id)
+                    if user_id not in ids or winner_id not in ids:
+                        continue
 
-                    # Find loser's password value
-                    loser_password = db.query(UserPassword).filter(
-                        UserPassword.user_id == loser_id,
-                        UserPassword.service_name == loser_service
-                    ).first()
-                    
-                    secret_value = loser_password.secret_value if loser_password else encrypt_password("unknown")
+                    challenger, defender = challenge.challenger, challenge.defender
+                    if not (
+                        _has_verified_chess(challenger)
+                        and _has_verified_chess(defender)
+                        and challenge.accepted_at
+                    ):
+                        continue
 
-                    # Add password to winner's bank
-                    password_bank = PasswordBank(
-                        user_id=winner_id,
-                        service_name=loser_service,
-                        collected_from=loser_id,
-                        secret_value=secret_value
+                    result = await run_in_threadpool(
+                        find_game_result,
+                        challenger.chess_username,
+                        defender.chess_username,
+                        challenge.accepted_at,
                     )
-                    db.add(password_bank)
+                    if not result:
+                        continue
 
-                    # Update challenge
-                    challenge.winner_id = winner_id
-                    challenge.status = "completed"
-                    challenge.completed_at = datetime.utcnow()
-                    
-                    db.commit()
-
-                    # Notify both players
-                    await manager.broadcast(
-                        {
-                            "type": "game_ended",
-                            "challenge_id": challenge_id,
-                            "winner_id": winner_id
-                        }
+                    verified_winner = (
+                        challenger
+                        if result["winner_username"].lower() == challenger.chess_username.lower()
+                        else defender
                     )
+                    if verified_winner.id != winner_id:
+                        continue
 
-                db.close()
+                    try:
+                        complete_challenge(db, challenge, winner_id, source="auto")
+                    except ValueError as e:
+                        print(f"[ws] game_end rejected for challenge {challenge_id}: {e}")
+                        continue
+
+                    pending_reports.pop(challenge.id, None)
+                    for uid in ids:
+                        await manager.send_to_user(
+                            uid,
+                            {
+                                "type": "game_ended",
+                                "challenge_id": challenge.id,
+                                "winner_id": winner_id,
+                                "source": "auto",
+                            },
+                        )
+                finally:
+                    db.close()
+
+            elif event_type == "report_result":
+                # Manual fallback: each player reports independently, and the
+                # result is only applied when both reports agree.
+                # winner_id is a participant id, or None for a draw.
+                challenge_id = data.get("challenge_id")
+                reported = data.get("winner_id")
+
+                db = SessionLocal()
+                try:
+                    challenge = db.query(Challenge).filter(Challenge.id == challenge_id).first()
+                    if not challenge or challenge.status != "accepted":
+                        continue
+                    ids = (challenge.challenger_id, challenge.defender_id)
+                    if user_id not in ids or (reported is not None and reported not in ids):
+                        continue
+
+                    other_id = (
+                        challenge.defender_id if user_id == challenge.challenger_id else challenge.challenger_id
+                    )
+                    reports = pending_reports.setdefault(challenge.id, {})
+                    reports[user_id] = reported  # a repeat report replaces the old one
+
+                    if other_id not in reports:
+                        await manager.send_to_user(
+                            other_id,
+                            {"type": "opponent_reported", "challenge_id": challenge.id},
+                        )
+
+                    elif reports[other_id] != reported:
+                        pending_reports.pop(challenge.id, None)
+                        for uid in ids:
+                            await manager.send_to_user(
+                                uid,
+                                {"type": "result_mismatch", "challenge_id": challenge.id},
+                            )
+
+                    elif reported is None:
+                        # Agreed draw: void the challenge, nothing transfers.
+                        pending_reports.pop(challenge.id, None)
+                        challenge.status = "void"
+                        challenge.result_source = "self_reported"
+                        challenge.completed_at = datetime.utcnow()
+                        db.commit()
+                        for uid in ids:
+                            await manager.send_to_user(
+                                uid,
+                                {"type": "challenge_voided", "challenge_id": challenge.id},
+                            )
+
+                    else:
+                        pending_reports.pop(challenge.id, None)
+                        try:
+                            complete_challenge(db, challenge, reported, source="self_reported")
+                        except ValueError as e:
+                            print(f"[ws] report_result failed for challenge {challenge_id}: {e}")
+                            continue
+                        for uid in ids:
+                            await manager.send_to_user(
+                                uid,
+                                {
+                                    "type": "game_ended",
+                                    "challenge_id": challenge.id,
+                                    "winner_id": reported,
+                                    "source": "self_reported",
+                                },
+                            )
+                finally:
+                    db.close()
 
     except Exception as e:
         print(f"WebSocket error for user {user_id}: {e}")
     finally:
         manager.disconnect(user_id)
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
