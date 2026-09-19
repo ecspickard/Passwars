@@ -19,12 +19,16 @@ def complete_challenge(db: Session, challenge: Challenge, winner_id: int, source
     The secret is copied over still-encrypted (both tables use the same
     at-rest encryption key), so this never touches plaintext.
 
-    Raises ValueError if `source` isn't valid or the loser's offering can't
-    be found (which would indicate a data-integrity problem, since an
-    accepted challenge should always have a matching offering).
+    Raises ValueError if `source` isn't valid, the challenge isn't in
+    'accepted' status, or the loser's offering can't be found (which would
+    indicate a data-integrity problem, since an accepted challenge should
+    always have a matching offering).
     """
     if source not in VALID_RESULT_SOURCES:
         raise ValueError(f"Invalid result source: {source!r}")
+
+    if challenge.status != "accepted":
+        raise ValueError(f"Challenge {challenge.id} is not in 'accepted' status (currently {challenge.status!r})")
 
     loser_id = challenge.defender_id if winner_id == challenge.challenger_id else challenge.challenger_id
     loser_service = challenge.defender_service if winner_id == challenge.challenger_id else challenge.challenger_service

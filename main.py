@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, update
 from datetime import datetime
 import os
+import asyncio
 
 from database import init_db, get_db, SessionLocal
 from models import Challenge, User
@@ -12,6 +13,7 @@ from routes_users import router as users_router
 from routes_challenges import router as challenges_router
 from connection_manager import manager
 from challenge_service import complete_challenge, VALID_RESULT_SOURCES
+from background_tasks import poll_accepted_challenges
 
 # Initialize database
 init_db()
@@ -31,6 +33,10 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(challenges_router)
+
+@app.on_event("startup")
+async def start_background_tasks():
+    asyncio.create_task(poll_accepted_challenges())
 
 # Health check
 @app.get("/api/health")
@@ -89,7 +95,7 @@ async def websocket_endpoint(user_id: int, websocket: WebSocket):
             elif event_type == "accept_challenge":
                 # Challenge accepted
                 challenge_id = data.get("challenge_id")
-                
+
                 db = SessionLocal()
                 challenge = db.query(Challenge).filter(Challenge.id == challenge_id).first()
                 if challenge:
@@ -97,21 +103,27 @@ async def websocket_endpoint(user_id: int, websocket: WebSocket):
                     challenge.accepted_at = datetime.utcnow()
                     db.commit()
 
-                    # Notify challenger
+                    challenger = challenge.challenger
+                    defender = challenge.defender
+
+                    # Notify challenger — include the defender's chess.com username so
+                    # the frontend can tell them who/where to play.
                     await manager.send_to_user(
                         challenge.challenger_id,
                         {
                             "type": "challenge_accepted",
-                            "challenge_id": challenge_id
+                            "challenge_id": challenge_id,
+                            "opponent_chess_username": defender.chess_username
                         }
                     )
-                    
-                    # Notify defender
+
+                    # Notify defender — same, but with the challenger's username.
                     await manager.send_to_user(
                         challenge.defender_id,
                         {
                             "type": "challenge_accepted",
-                            "challenge_id": challenge_id
+                            "challenge_id": challenge_id,
+                            "opponent_chess_username": challenger.chess_username
                         }
                     )
                 db.close()

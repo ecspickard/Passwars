@@ -11,21 +11,21 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 def signup(request: UserSignupRequest, db: Session = Depends(get_db)):
     """Create a new user account"""
-    
+
     # Check if user already exists
     existing_user = db.query(User).filter(
         (User.username == request.username) | (User.email == request.email)
     ).first()
-    
+
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username or email already exists"
         )
-    
+
     # Hash password
     password_hash = hash_password(request.password)
-    
+
     # Create user
     new_user = User(
         username=request.username,

@@ -5,8 +5,10 @@ import string
 from datetime import datetime, timedelta
 from typing import Optional
 from dotenv import load_dotenv
-from cryptography.fernet import Fernet, InvalidToken
 import os
+import base64
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
 
 load_dotenv()
 
@@ -14,9 +16,9 @@ JWT_SECRET = os.getenv("JWT_SECRET")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 10080))
 
-# Fernet key for at-rest encryption of wagered secrets (UserPassword.secret_value,
+# AES-256-GCM key for at-rest encryption of wagered secrets (UserPassword.secret_value,
 # PasswordBank.secret_value). Generate one with:
-#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+#   python -c "import os, base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
 # and put it in .env as ENCRYPTION_KEY. Losing/rotating this key makes
 # previously stored secrets permanently unreadable, so treat it like a
 # production credential - back it up, don't commit it.
@@ -54,29 +56,37 @@ def decode_token(token: str) -> Optional[dict]:
         return None
 
 
-def _get_fernet() -> Fernet:
+def _get_aesgcm() -> AESGCM:
     if not ENCRYPTION_KEY:
         raise RuntimeError(
-            "ENCRYPTION_KEY is not set. Generate one with "
-            "Fernet.generate_key() and add it to your .env file."
+            "ENCRYPTION_KEY is not set. Generate a 32-byte key and add it to your .env file."
         )
-    key = ENCRYPTION_KEY.encode("utf-8") if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY
-    return Fernet(key)
+    key = base64.urlsafe_b64decode(ENCRYPTION_KEY)
+    if len(key) != 32:
+        raise RuntimeError("ENCRYPTION_KEY must decode to exactly 32 bytes for AES-256.")
+    return AESGCM(key)
 
 
 def encrypt_secret(plaintext: str) -> str:
-    """Encrypt a wagered secret (e.g. an offered password) before it's stored."""
-    return _get_fernet().encrypt(plaintext.encode("utf-8")).decode("utf-8")
+    """Encrypt a wagered secret before it's stored, using AES-256-GCM."""
+    aesgcm = _get_aesgcm()
+    nonce = os.urandom(12)  # 96-bit nonce, required unique per encryption with the same key
+    ciphertext = aesgcm.encrypt(nonce, plaintext.encode("utf-8"), None)
+    # Store nonce + ciphertext together so decrypt has what it needs
+    return base64.urlsafe_b64encode(nonce + ciphertext).decode("utf-8")
 
 
 def decrypt_secret(ciphertext: str) -> str:
     """Decrypt a stored secret for reveal-on-demand display. Raises ValueError
     if the ciphertext can't be decrypted with the current key."""
+    aesgcm = _get_aesgcm()
     try:
-        return _get_fernet().decrypt(ciphertext.encode("utf-8")).decode("utf-8")
-    except InvalidToken:
+        raw = base64.urlsafe_b64decode(ciphertext.encode("utf-8"))
+        nonce, actual_ciphertext = raw[:12], raw[12:]
+        return aesgcm.decrypt(nonce, actual_ciphertext, None).decode("utf-8")
+    except Exception:
         raise ValueError("Unable to decrypt secret - invalid key or corrupted data")
-
+    
 
 def generate_verification_code(length: int = 10) -> str:
     """One-time code a user pastes into their Chess.com profile Location field
