@@ -81,6 +81,7 @@ class PlayerResponse(BaseModel):
     id: int
     username: str
     services: List[str]
+    chess_username: Optional[str] = None
 
 class LeaderboardResponse(BaseModel):
     id: int

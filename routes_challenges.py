@@ -1,4 +1,7 @@
+from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException, status, Header
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -10,6 +13,25 @@ from chess_api import find_game_result
 from challenge_service import complete_challenge
 
 router = APIRouter(prefix="/api/challenges", tags=["challenges"])
+
+
+@router.get("/mine", response_model=List[ChallengeResponse])
+def list_my_challenges(
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Pending and accepted challenges the current user is part of."""
+    current_user = get_current_user(authorization, db)
+
+    challenges = db.query(Challenge).filter(
+        or_(
+            Challenge.challenger_id == current_user.id,
+            Challenge.defender_id == current_user.id,
+        ),
+        Challenge.status.in_(["pending", "accepted"]),
+    ).order_by(Challenge.created_at.desc()).all()
+
+    return [ChallengeResponse.from_orm(c) for c in challenges]
 
 
 @router.post("/{challenge_id}/auto-resolve", response_model=ChallengeResponse)
