@@ -16,7 +16,8 @@ export interface BankEntry {
 export interface BankSecretReveal {
   id: number;
   service_name: string;
-  secret_value: string;
+  username: string;
+  password_value: string;
 }
 
 export const listBankEntries = () => api.get<BankEntry[]>("/users/password-bank");

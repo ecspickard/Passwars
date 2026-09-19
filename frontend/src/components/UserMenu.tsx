@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { lookupChessComPlayer } from "../lib/chess";
 
 export function UserMenu() {
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
+  const [avatar, setAvatar] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
@@ -17,6 +19,16 @@ export function UserMenu() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (user?.chess_username) {
+      lookupChessComPlayer(user.chess_username).then((result) => {
+        if (result.status === "found" && result.profile.avatar) {
+          setAvatar(result.profile.avatar);
+        }
+      });
+    }
+  }, [user?.chess_username]);
 
   if (!user) return null;
 
@@ -35,9 +47,13 @@ export function UserMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gold-500 font-display text-xs font-semibold text-ink-950">
-          {user.username.slice(0, 1).toUpperCase()}
-        </span>
+        {avatar ? (
+          <img src={avatar} alt={user.username} className="h-6 w-6 rounded-full object-cover" />
+        ) : (
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gold-500 font-display text-xs font-semibold text-ink-950">
+            {user.username.slice(0, 1).toUpperCase()}
+          </span>
+        )}
         {user.username}
       </button>
 

@@ -29,12 +29,22 @@ class UserResponse(BaseModel):
     class Config:
         from_attributes = True
 
+from typing import Any, Dict
+
+class PasswordWonItem(BaseModel):
+    service: str
+    player_username: str
+
 class UserProfileResponse(BaseModel):
     id: int
     username: str
     created_at: datetime
+    chess_username: Optional[str] = None
+    chess_avatar: Optional[str] = None
+    chess_stats: Optional[Dict[str, int]] = None
     offerings: List[str]
     passwords_collected: int
+    passwords_won: List[PasswordWonItem] = []
 
     class Config:
         from_attributes = True
@@ -50,10 +60,12 @@ class AccountDeleteRequest(BaseModel):
 class PasswordAddRequest(BaseModel):
     service_name: str
     password_value: str
+    username: Optional[str] = None
 
 class PasswordUpdateRequest(BaseModel):
     service_name: Optional[str] = None
     secret_value: Optional[str] = None
+    username: Optional[str] = None
 
 class PasswordResponse(BaseModel):
     id: int
@@ -63,6 +75,14 @@ class PasswordResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class PasswordRevealResponse(BaseModel):
+    id: int
+    service_name: str
+    username: str
+    password_value: str
+    collected_from: Optional[int] = None
+    collected_at: Optional[datetime] = None
 
 class PasswordBankResponse(BaseModel):
     id: int

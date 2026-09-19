@@ -46,6 +46,18 @@ def get_chess_player_profile(username: str) -> Optional[dict]:
     return resp.json()
 
 
+def get_chess_player_stats(username: str) -> Optional[dict]:
+    """Fetch a Chess.com player's stats (ELO, etc.), or None if it doesn't exist."""
+    resp = requests.get(
+        f"{CHESS_API_BASE}/player/{username}/stats",
+        headers=REQUEST_HEADERS,
+        timeout=REQUEST_TIMEOUT,
+    )
+    if resp.status_code != 200:
+        return None
+    return resp.json()
+
+
 def verify_ownership_via_location(username: str, code: str) -> bool:
     """
     Ownership check: the user was asked to temporarily put `code` somewhere

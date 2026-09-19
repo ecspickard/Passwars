@@ -12,6 +12,30 @@ export interface AccountDeleteRequest {
   password: string;
 }
 
+export interface PasswordWonItem {
+  service: string;
+  player_username: string;
+}
+
+export interface UserProfile {
+  id: number;
+  username: string;
+  created_at: string;
+  chess_username?: string | null;
+  chess_avatar?: string | null;
+  chess_stats?: Record<string, number> | null;
+  offerings: string[];
+  passwords_collected: number;
+  passwords_won: PasswordWonItem[];
+}
+
+/**
+ * Fetch a player's public profile data.
+ */
+export async function getUserProfile(id: number | string): Promise<UserProfile> {
+  return api.get<UserProfile>(`/users/profile/${id}`);
+}
+
 /**
  * Update the current user's profile (username and/or email).
  * Both fields are optional — omit to keep unchanged.

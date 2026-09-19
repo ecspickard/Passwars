@@ -19,6 +19,7 @@ export function VaultEntryModal({ mode, entry, onClose, onSaved }: Props) {
   const isEdit = mode === "edit";
 
   const [serviceName, setServiceName] = useState(entry?.service_name ?? "");
+  const [username, setUsername] = useState(""); // Note: We don't fetch username for edit unless we trigger reveal
   // Holds a real password while this form is open — that's unavoidable
   // while the user is typing it in, but it's local to this component, never
   // logged, and discarded the moment the modal closes (nothing here lifts
@@ -45,12 +46,13 @@ export function VaultEntryModal({ mode, entry, onClose, onSaved }: Props) {
     try {
       let saved: VaultEntry;
       if (isEdit && entry) {
-        const updates: { service_name?: string; secret_value?: string } = {};
+        const updates: { service_name?: string; secret_value?: string; username?: string } = {};
         if (trimmedName !== entry.service_name) updates.service_name = trimmedName;
         if (secret) updates.secret_value = secret;
+        if (username) updates.username = username;
         saved = Object.keys(updates).length > 0 ? await updateVaultEntry(entry.id, updates) : entry;
       } else {
-        saved = await addVaultEntry(trimmedName, secret);
+        saved = await addVaultEntry(trimmedName, secret, username);
       }
       onSaved(saved);
     } catch (err) {
@@ -67,7 +69,7 @@ export function VaultEntryModal({ mode, entry, onClose, onSaved }: Props) {
       aria-modal="true"
       aria-labelledby="vault-modal-title"
     >
-      <div className="panel w-full max-w-sm p-6">
+      <div className="bg-ink-900/97 border border-ink-700 rounded-panel shadow-2xl shadow-black/50 w-full max-w-sm p-6">
         <h2 id="vault-modal-title" className="font-display text-lg text-parchment-50">
           {isEdit ? "Edit service" : "Add a service"}
         </h2>
@@ -84,6 +86,22 @@ export function VaultEntryModal({ mode, entry, onClose, onSaved }: Props) {
               maxLength={SERVICE_NAME_MAX}
               autoFocus
               disabled={isSubmitting}
+            />
+          </FormField>
+
+          <FormField
+            id="vault-username"
+            label="Username/Email"
+            hint={isEdit ? "Leave blank to keep current Username/Email." : "Optional"}
+          >
+            <input
+              id="vault-username"
+              type="text"
+              className="input-field"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              disabled={isSubmitting}
+              placeholder="user@example.com"
             />
           </FormField>
 

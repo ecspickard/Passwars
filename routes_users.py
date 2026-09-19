@@ -8,7 +8,7 @@ from models import User, UserPassword, PasswordBank, PasswordAuditLog
 from schemas import (
     PasswordAddRequest, PasswordUpdateRequest, PasswordResponse, PasswordBankResponse,
     PlayerResponse, LeaderboardResponse, UserResponse, UserProfileUpdateRequest,
-    AccountDeleteRequest
+    AccountDeleteRequest, PasswordRevealResponse
 )
 from utils import decode_token, encrypt_password, decrypt_password, verify_password, hash_password
 from chess_api import chess_user_exists, verify_ownership_via_location
@@ -64,14 +64,15 @@ def add_password(
     db: Session = Depends(get_db)
 ):
     """Add a password offering"""
-    
+    import json
     current_user = get_current_user(authorization, db)
     
     try:
+        data = {"username": request.username or "", "password": request.password_value}
         new_password = UserPassword(
             user_id=current_user.id,
             service_name=request.service_name,
-            secret_value=encrypt_password(request.password_value)
+            secret_value=encrypt_password(json.dumps(data))
         )
         db.add(new_password)
         db.commit()
@@ -99,6 +100,7 @@ def update_password(
     authorization: str = Header(None),
     db: Session = Depends(get_db)
 ):
+    import json
     current_user = get_current_user(authorization, db)
     pwd = db.query(UserPassword).filter(UserPassword.id == password_id, UserPassword.user_id == current_user.id).first()
     if not pwd:
@@ -106,8 +108,20 @@ def update_password(
     
     if request.service_name is not None:
         pwd.service_name = request.service_name
-    if request.secret_value is not None:
-        pwd.secret_value = encrypt_password(request.secret_value)
+        
+    if request.secret_value is not None or request.username is not None:
+        plaintext = decrypt_password(pwd.secret_value)
+        try:
+            data = json.loads(plaintext)
+        except json.JSONDecodeError:
+            data = {"username": "", "password": plaintext}
+            
+        if request.secret_value is not None:
+            data["password"] = request.secret_value
+        if request.username is not None:
+            data["username"] = request.username
+            
+        pwd.secret_value = encrypt_password(json.dumps(data))
         
     db.commit()
     db.refresh(pwd)
@@ -127,21 +141,32 @@ def delete_password(
     db.commit()
     return None
 
-@router.get("/passwords/{password_id}/reveal")
+@router.get("/passwords/{password_id}/reveal", response_model=PasswordRevealResponse)
 def reveal_own_password(
     password_id: int,
     authorization: str = Header(None),
     db: Session = Depends(get_db)
 ):
+    import json
     current_user = get_current_user(authorization, db)
     pwd = db.query(UserPassword).filter(UserPassword.id == password_id, UserPassword.user_id == current_user.id).first()
     if not pwd:
         raise HTTPException(status_code=404, detail="Password not found")
     
+    plaintext = decrypt_password(pwd.secret_value)
+    try:
+        data = json.loads(plaintext)
+        username = data.get("username", "")
+        password_value = data.get("password", "")
+    except json.JSONDecodeError:
+        username = ""
+        password_value = plaintext
+
     return {
         "id": pwd.id,
         "service_name": pwd.service_name,
-        "secret_value": decrypt_password(pwd.secret_value)
+        "username": username,
+        "password_value": password_value
     }
 
 @router.get("/players", response_model=List[PlayerResponse])
@@ -180,7 +205,7 @@ def get_password_bank(
     return [PasswordBankResponse.from_orm(p) for p in passwords]
 
 
-@router.get("/password-bank/{password_id}/reveal")
+@router.get("/password-bank/{password_id}/reveal", response_model=PasswordRevealResponse)
 def reveal_password(
     password_id: int,
     authorization: str = Header(None),
@@ -188,7 +213,7 @@ def reveal_password(
     db: Session = Depends(get_db)
 ):
     """Reveal/decrypt a collected password (secure endpoint)"""
-    
+    import json
     current_user = get_current_user(authorization, db)
     
     pwd = db.query(PasswordBank).filter(PasswordBank.id == password_id).first()
@@ -204,9 +229,6 @@ def reveal_password(
     ip_address = request.client.host if request else None
     log_password_access(db, current_user.id, password_id, "revealed", ip_address)
     
-    # Decrypt. Only the decrypt call is inside the try, and the real error is
-    # printed to the server console (never the secret itself) so a failure
-    # here can be diagnosed instead of showing up as a bare 500.
     try:
         plaintext = decrypt_password(pwd.secret_value)
     except Exception:
@@ -215,12 +237,19 @@ def reveal_password(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Failed to decrypt password")
 
-    # Same response shape as the vault's reveal endpoint (frontend reads
-    # `secret_value`; this used to be returned as `password`).
+    try:
+        data = json.loads(plaintext)
+        username = data.get("username", "")
+        password_value = data.get("password", "")
+    except json.JSONDecodeError:
+        username = ""
+        password_value = plaintext
+
     return {
         "id": pwd.id,
         "service_name": pwd.service_name,
-        "secret_value": plaintext,
+        "username": username,
+        "password_value": password_value,
         "collected_from": pwd.collected_from,
         "collected_at": pwd.collected_at,
     }
@@ -248,7 +277,9 @@ def get_leaderboard(db: Session = Depends(get_db), limit: int = 50):
     
     return leaderboard
 
-@router.get("/profile/{user_id}", response_model=dict)
+from schemas import UserProfileResponse
+
+@router.get("/profile/{user_id}", response_model=UserProfileResponse)
 def get_user_profile(user_id: int, db: Session = Depends(get_db)):
     """Get user profile with offerings and password count"""
     
@@ -264,13 +295,52 @@ def get_user_profile(user_id: int, db: Session = Depends(get_db)):
     password_count = db.query(func.count(PasswordBank.id)).filter(
         PasswordBank.user_id == user_id
     ).scalar() or 0
+
+    chess_username = user.chess_username if user.chess_verified_at else None
+    chess_avatar = None
+    chess_stats = None
+    
+    if chess_username:
+        try:
+            from chess_api import get_chess_player_profile, get_chess_player_stats
+            chess_profile = get_chess_player_profile(chess_username)
+            if chess_profile:
+                chess_avatar = chess_profile.get("avatar")
+            
+            stats = get_chess_player_stats(chess_username)
+            if stats:
+                chess_stats = {}
+                for k, v in stats.items():
+                    if isinstance(v, dict) and "last" in v:
+                        chess_stats[k] = v["last"]["rating"]
+        except Exception as e:
+            print(f"Error fetching chess info for {chess_username}: {e}")
+
+    # Fetch passwords won (join PasswordBank with User on collected_from)
+    from sqlalchemy.orm import aliased
+    Victim = aliased(User)
+    won_entries = db.query(PasswordBank.service_name, Victim.username).join(
+        Victim, PasswordBank.collected_from == Victim.id
+    ).filter(
+        PasswordBank.user_id == user_id,
+        PasswordBank.collected_from.isnot(None)
+    ).all()
+    
+    passwords_won = [
+        {"service": e.service_name, "player_username": e.username}
+        for e in won_entries
+    ]
     
     return {
         "id": user.id,
         "username": user.username,
         "created_at": user.created_at,
+        "chess_username": chess_username,
+        "chess_avatar": chess_avatar,
+        "chess_stats": chess_stats,
         "offerings": offerings,
-        "passwords_collected": password_count
+        "passwords_collected": password_count,
+        "passwords_won": passwords_won,
     }
 
 @router.get("/me", response_model=UserResponse)

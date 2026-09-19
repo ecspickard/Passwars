@@ -13,18 +13,20 @@ export interface VaultEntry {
 export interface VaultSecretReveal {
   id: number;
   service_name: string;
-  secret_value: string;
+  username: string;
+  password_value: string;
 }
 
 export interface VaultEntryUpdate {
   service_name?: string;
   secret_value?: string;
+  username?: string;
 }
 
 export const listVaultEntries = () => api.get<VaultEntry[]>("/users/passwords");
 
-export const addVaultEntry = (service_name: string, password_value: string) =>
-  api.post<VaultEntry>("/users/passwords", { service_name, password_value });
+export const addVaultEntry = (service_name: string, password_value: string, username?: string) =>
+  api.post<VaultEntry>("/users/passwords", { service_name, password_value, username });
 
 export const updateVaultEntry = (id: number, updates: VaultEntryUpdate) =>
   api.patch<VaultEntry>(`/users/passwords/${id}`, updates);
