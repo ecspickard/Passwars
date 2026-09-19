@@ -8,7 +8,7 @@ export default function Profile() {
     <div>
       <PageHeading
         title="Player profile"
-        description={`Backed by GET /api/users/profile/${id} — offerings, join date, and total passwords won.`}
+        description="View player's chess stats, wagered services, and battle history"
       />
       <div className="panel p-8 text-center text-steel-400">Profile details will appear here.</div>
     </div>

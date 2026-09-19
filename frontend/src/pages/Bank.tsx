@@ -50,7 +50,7 @@ export default function Bank() {
     <div>
       <PageHeading
         title="Password bank"
-        description="Services you've won off other players. Copy a password when you need it; it's never shown on screen."
+        description="Services you've won off other players"
       />
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">

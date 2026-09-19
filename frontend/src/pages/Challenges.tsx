@@ -95,7 +95,7 @@ export default function Challenges() {
     <div>
       <PageHeading
         title="Challenge Arena"
-        description="Find a player, pick the service you want off them, and challenge them to a Chess.com game."
+        description="Find a player, pick the service you want off them, and challenge them to a Chess.com game"
       />
 
       {!ownVerified && (

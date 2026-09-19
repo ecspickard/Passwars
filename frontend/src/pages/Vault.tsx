@@ -71,7 +71,7 @@ export default function Vault() {
     <div>
       <PageHeading
         title="Your vault"
-        description="The services you've staked, backed by POST /api/users/passwords."
+        description="The services you've staked"
       />
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
