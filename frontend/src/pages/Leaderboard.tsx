@@ -11,13 +11,14 @@ import {
 import type { LeaderboardEntry } from "../lib/types";
 
 const CHESS_RANK: Record<number, { icon: string; className: string }> = {
-  1: { icon: "♔", className: "text-gold-400 text-xl drop-shadow-sm inline-block -translate-y-px" },
-  2: { icon: "♕", className: "text-gold-400 text-lg inline-block -translate-y-px" },
-  3: { icon: "♗", className: "text-gold-500 text-lg inline-block -translate-y-px" },
+  1: { icon: "♔", className: "text-gold-400 text-xl drop-shadow-sm inline-block" },
+  2: { icon: "♕", className: "text-gold-400 text-lg inline-block" },
+  3: { icon: "♗", className: "text-gold-500 text-lg inline-block" },
 };
 
 export default function Leaderboard() {
   const { user } = useAuth();
+  const isMac = typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('mac');
 
   const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null);
   const [limit, setLimit] = useState(DEFAULT_LEADERBOARD_LIMIT);
@@ -95,7 +96,7 @@ export default function Leaderboard() {
                       <td className="px-4 py-3 font-display text-parchment-50">
                         <span className="text-steel-400 mr-2 font-ui text-sm">#{rank}</span>
                         {chessRank && (
-                          <span aria-hidden className={chessRank.className} title={`Rank ${rank}`}>{chessRank.icon}</span>
+                          <span aria-hidden className={`${chessRank.className} ${isMac ? '-translate-y-px' : ''}`} title={`Rank ${rank}`}>{chessRank.icon}</span>
                         )}
                         {chessRank && <span className="sr-only">Rank {rank}</span>}
                       </td>

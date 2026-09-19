@@ -6,14 +6,15 @@ import { getRankForUser, type RankInfo } from "../lib/leaderboard";
 import { getUserProfile, type UserProfile } from "../lib/profile";
 
 const CHESS_RANK: Record<number, { icon: string; className: string }> = {
-  1: { icon: "♔", className: "text-gold-400 drop-shadow-sm inline-block -translate-y-[5px]" },
-  2: { icon: "♕", className: "text-gold-400 inline-block -translate-y-[5px]" },
-  3: { icon: "♗", className: "text-gold-500 inline-block -translate-y-[5px]" },
+  1: { icon: "♔", className: "text-gold-400 drop-shadow-sm inline-block" },
+  2: { icon: "♕", className: "text-gold-400 inline-block" },
+  3: { icon: "♗", className: "text-gold-500 inline-block" },
 };
 
 export default function Profile() {
   const { id } = useParams<{ id: string }>();
   const { user: viewer } = useAuth();
+  const isMac = typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('mac');
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -145,7 +146,7 @@ export default function Profile() {
             <div className="flex items-center gap-2">
               <span className="font-ui text-2xl text-steel-400">#{rank.rank}</span>
               {CHESS_RANK[rank.rank] && (
-                <span className={`font-display text-4xl ${CHESS_RANK[rank.rank].className}`} aria-hidden>
+                <span className={`font-display text-4xl ${CHESS_RANK[rank.rank].className} ${isMac ? '-translate-y-[5px]' : ''}`} aria-hidden>
                   {CHESS_RANK[rank.rank].icon}
                 </span>
               )}
