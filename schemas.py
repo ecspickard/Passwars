@@ -44,6 +44,13 @@ class PasswordAddRequest(BaseModel):
     service_name: str
     secret_value: str  # the actual wagered secret; encrypted before storage
 
+class PasswordUpdateRequest(BaseModel):
+    """Both fields optional - PATCH sends only what changed. A blank/omitted
+    secret_value means "keep the existing secret"; the frontend enforces
+    this by only including the field when the user typed a new one."""
+    service_name: Optional[str] = None
+    secret_value: Optional[str] = None
+
 class PasswordResponse(BaseModel):
     id: int
     user_id: int

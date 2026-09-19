@@ -6,7 +6,7 @@ from datetime import datetime
 from database import get_db
 from models import User, UserPassword, PasswordBank
 from schemas import (
-    PasswordAddRequest, PasswordResponse, PasswordBankResponse,
+    PasswordAddRequest, PasswordUpdateRequest, PasswordResponse, PasswordBankResponse,
     PlayerResponse, LeaderboardResponse, UserResponse, SecretRevealResponse,
     ChessUsernameStartRequest, ChessUsernameStartResponse, ChessUsernameVerifyResponse
 )
@@ -69,6 +69,91 @@ def add_password(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Already offering this service"
         )
+
+@router.get("/passwords", response_model=List[PasswordResponse])
+def list_passwords(
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """List the current user's own password offerings (vault view). Never
+    returns secret_value - that only ever comes back from the reveal
+    endpoint below, fetched fresh and on demand."""
+
+    current_user = get_current_user(authorization, db)
+
+    offerings = db.query(UserPassword).filter(
+        UserPassword.user_id == current_user.id
+    ).order_by(UserPassword.created_at.desc()).all()
+
+    return [PasswordResponse.from_orm(p) for p in offerings]
+
+@router.patch("/passwords/{password_id}", response_model=PasswordResponse)
+def update_password(
+    password_id: int,
+    request: PasswordUpdateRequest,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Rename a service and/or rotate its stored secret. Both fields are
+    optional on the request - send only what changed. A new secret_value is
+    re-encrypted before storage, same as on creation."""
+
+    current_user = get_current_user(authorization, db)
+
+    offering = db.query(UserPassword).filter(
+        UserPassword.id == password_id,
+        UserPassword.user_id == current_user.id
+    ).first()
+
+    if not offering:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offering not found")
+
+    if request.service_name is not None:
+        offering.service_name = request.service_name
+    if request.secret_value is not None:
+        offering.secret_value = encrypt_secret(request.secret_value)
+
+    try:
+        db.commit()
+        db.refresh(offering)
+    except exc.IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Already offering this service"
+        )
+
+    return PasswordResponse.from_orm(offering)
+
+@router.delete("/passwords/{password_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_password(
+    password_id: int,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Remove one of the current user's own password offerings.
+
+    TODO(product): this doesn't yet check whether the service is currently
+    wagered in a pending/accepted Challenge. challenge_service.py looks up
+    the loser's UserPassword by (user_id, service_name) at resolution time,
+    so deleting a staked entry could make an in-flight challenge
+    unresolvable. Needs a "can't delete a staked service" rule (or a
+    snapshot of the secret at challenge-accept time) before this ships -
+    out of scope for the vault CRUD work itself.
+    """
+
+    current_user = get_current_user(authorization, db)
+
+    offering = db.query(UserPassword).filter(
+        UserPassword.id == password_id,
+        UserPassword.user_id == current_user.id
+    ).first()
+
+    if not offering:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offering not found")
+
+    db.delete(offering)
+    db.commit()
 
 @router.get("/players", response_model=List[PlayerResponse])
 def get_players(db: Session = Depends(get_db)):
