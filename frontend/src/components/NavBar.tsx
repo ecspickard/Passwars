@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useWebSocket } from "../hooks/useWebSocket";
+import { ChessLinkBadge } from "./ChessLinkBadge";
 import { NotificationBell } from "./NotificationBell";
 import { UserMenu } from "./UserMenu";
 
@@ -48,6 +49,7 @@ export function NavBar() {
 
         {user && (
           <div className="flex items-center gap-3">
+            <ChessLinkBadge />
             <span
               className={`hidden h-2 w-2 rounded-full sm:inline-block ${
                 isConnected ? "bg-felt-500" : "bg-signal-500"

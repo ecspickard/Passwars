@@ -25,6 +25,10 @@ interface AuthContextValue {
   login: (username: string, password: string) => Promise<void>;
   signup: (username: string, email: string, password: string) => Promise<void>;
   logout: () => void;
+  /** Re-fetches /users/me and updates context + localStorage. Use this after
+   * anything that changes user state server-side outside login/signup
+   * (e.g. verifying or unlinking a Chess.com account). */
+  refreshUser: () => Promise<User>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -98,9 +102,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const refreshUser = useCallback(async () => {
+    const freshUser = await api.get<User>("/users/me");
+    setUser(freshUser);
+    setStoredUser(freshUser);
+    return freshUser;
+  }, []);
+
   const value = useMemo(
-    () => ({ user, token, isInitializing, login, signup, logout }),
-    [user, token, isInitializing, login, signup, logout],
+    () => ({ user, token, isInitializing, login, signup, logout, refreshUser }),
+    [user, token, isInitializing, login, signup, logout, refreshUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

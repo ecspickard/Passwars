@@ -7,6 +7,7 @@ export interface User {
   username: string;
   email: string;
   chess_username?: string | null; // extended
+  chess_verified_at?: string | null; // extended — set once ownership is verified
 }
 
 export interface AuthResponse {

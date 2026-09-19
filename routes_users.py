@@ -272,3 +272,21 @@ def verify_chess_username(
         verified=verified,
         verified_at=current_user.chess_verified_at
     )
+
+
+@router.delete("/chess-username", status_code=status.HTTP_204_NO_CONTENT)
+def unlink_chess_username(
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Remove the linked Chess.com account entirely (whether or not it was
+    verified). A fresh start()/verify() is required to link again — nothing
+    carries over.
+    """
+    current_user = get_current_user(authorization, db)
+
+    current_user.chess_username = None
+    current_user.chess_verification_code = None
+    current_user.chess_verified_at = None
+    db.commit()
