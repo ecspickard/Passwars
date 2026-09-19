@@ -60,7 +60,7 @@ export interface Challenge {
   challenger_service: string;
   defender_service: string;
   challenger_name: string;
-  status: "pending" | "accepted" | "denied" | "completed";
+  status: "pending" | "accepted" | "denied" | "completed" | "expired";
   winner_id?: number | null;
   accepted_at?: string | null; // extended
   source?: ChallengeSource; // extended

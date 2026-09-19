@@ -1,9 +1,12 @@
 """
 Background poller that automatically resolves accepted challenges by
 checking Chess.com for a finished, decisive game between the two linked
-accounts - so players don't have to manually trigger auto-resolve.
+accounts - so players don't have to manually trigger auto-resolve. Also
+expires stale pending challenges so an unanswered invite doesn't block the
+challenger's offering from being deleted or reused forever.
 """
 import asyncio
+from datetime import datetime, timedelta
 
 from starlette.concurrency import run_in_threadpool
 
@@ -14,6 +17,7 @@ from challenge_service import complete_challenge
 from connection_manager import manager
 
 POLL_INTERVAL_SECONDS = 45
+PENDING_CHALLENGE_TTL = timedelta(hours=1)
 
 
 async def _check_challenge(db, challenge: Challenge):
@@ -61,8 +65,33 @@ async def _check_challenge(db, challenge: Challenge):
         )
 
 
+async def _expire_stale_pending_challenges(db):
+    """Pending challenges older than the TTL auto-expire, so an unanswered
+    invite doesn't block the challenger's offering from being deleted or
+    reused forever."""
+    cutoff = datetime.utcnow() - PENDING_CHALLENGE_TTL
+    stale = db.query(Challenge).filter(
+        Challenge.status == "pending",
+        Challenge.created_at < cutoff,
+    ).all()
+
+    for challenge in stale:
+        challenge.status = "expired"
+        db.commit()
+
+        for uid in (challenge.challenger_id, challenge.defender_id):
+            await manager.send_to_user(
+                uid,
+                {
+                    "type": "challenge_expired",
+                    "challenge_id": challenge.id,
+                },
+            )
+
+
 async def poll_accepted_challenges():
-    """Runs forever, checking every accepted challenge on each interval."""
+    """Runs forever: resolves accepted challenges via Chess.com, and expires
+    stale pending ones."""
     while True:
         db = SessionLocal()
         try:
@@ -72,6 +101,11 @@ async def poll_accepted_challenges():
                     await _check_challenge(db, challenge)
                 except Exception as e:
                     print(f"[poller] error checking challenge {challenge.id}: {e}")
+
+            try:
+                await _expire_stale_pending_challenges(db)
+            except Exception as e:
+                print(f"[poller] error expiring stale challenges: {e}")
         finally:
             db.close()
 

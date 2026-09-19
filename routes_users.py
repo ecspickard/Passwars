@@ -4,7 +4,7 @@ from sqlalchemy import func, exc
 from typing import List
 from datetime import datetime
 from database import get_db
-from models import User, UserPassword, PasswordBank
+from models import User, UserPassword, PasswordBank, Challenge
 from schemas import (
     PasswordAddRequest, PasswordUpdateRequest, PasswordResponse, PasswordBankResponse,
     PlayerResponse, LeaderboardResponse, UserResponse, SecretRevealResponse,
@@ -14,6 +14,18 @@ from utils import decode_token, encrypt_secret, decrypt_secret, generate_verific
 from chess_api import chess_user_exists, verify_ownership_via_location
 
 router = APIRouter(prefix="/api/users", tags=["users"])
+
+def _get_active_challenge_for_offering(db: Session, user_id: int, service_name: str) -> Challenge | None:
+    """Returns the accepted challenge wagering this service, if any (checking
+    both challenger and defender sides), so callers can block edits/deletes
+    on an offering while a real game might be in progress."""
+    return db.query(Challenge).filter(
+        Challenge.status == "accepted",
+        (
+            ((Challenge.challenger_id == user_id) & (Challenge.challenger_service == service_name))
+            | ((Challenge.defender_id == user_id) & (Challenge.defender_service == service_name))
+        )
+    ).first()
 
 def get_current_user(token: str = Header(None, alias="Authorization"), db: Session = Depends(get_db)) -> User:
     """Get current user from JWT token"""
@@ -94,10 +106,9 @@ def update_password(
     authorization: str = Header(None),
     db: Session = Depends(get_db)
 ):
-    """Rename a service and/or rotate its stored secret. Both fields are
-    optional on the request - send only what changed. A new secret_value is
-    re-encrypted before storage, same as on creation."""
-
+    """Update a password offering's service name and/or secret. Only the
+    owner can edit it. Blocked if the offering is wagered in a challenge
+    that's already been accepted."""
     current_user = get_current_user(authorization, db)
 
     offering = db.query(UserPassword).filter(
@@ -107,6 +118,16 @@ def update_password(
 
     if not offering:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offering not found")
+
+    active_challenge = _get_active_challenge_for_offering(db, current_user.id, offering.service_name)
+    if active_challenge:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Can't edit '{offering.service_name}' - it's wagered in an active "
+                "challenge. Wait for the game to resolve first."
+            )
+        )
 
     if request.service_name is not None:
         offering.service_name = request.service_name
@@ -116,6 +137,7 @@ def update_password(
     try:
         db.commit()
         db.refresh(offering)
+        return PasswordResponse.from_orm(offering)
     except exc.IntegrityError:
         db.rollback()
         raise HTTPException(
@@ -123,7 +145,6 @@ def update_password(
             detail="Already offering this service"
         )
 
-    return PasswordResponse.from_orm(offering)
 
 @router.delete("/passwords/{password_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_password(
@@ -131,17 +152,8 @@ def delete_password(
     authorization: str = Header(None),
     db: Session = Depends(get_db)
 ):
-    """Remove one of the current user's own password offerings.
-
-    TODO(product): this doesn't yet check whether the service is currently
-    wagered in a pending/accepted Challenge. challenge_service.py looks up
-    the loser's UserPassword by (user_id, service_name) at resolution time,
-    so deleting a staked entry could make an in-flight challenge
-    unresolvable. Needs a "can't delete a staked service" rule (or a
-    snapshot of the secret at challenge-accept time) before this ships -
-    out of scope for the vault CRUD work itself.
-    """
-
+    """Delete a password offering. Only the owner can delete it. Blocked if
+    the offering is wagered in a challenge that's already been accepted."""
     current_user = get_current_user(authorization, db)
 
     offering = db.query(UserPassword).filter(
@@ -151,6 +163,16 @@ def delete_password(
 
     if not offering:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offering not found")
+
+    active_challenge = _get_active_challenge_for_offering(db, current_user.id, offering.service_name)
+    if active_challenge:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Can't delete '{offering.service_name}' - it's wagered in an active "
+                "challenge. Wait for the game to resolve first."
+            )
+        )
 
     db.delete(offering)
     db.commit()
