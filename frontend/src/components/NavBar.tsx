@@ -9,6 +9,7 @@ const LINKS = [
   { to: "/vault", label: "Vault" },
   { to: "/challenges", label: "Challenge Arena" },
   { to: "/leaderboard", label: "Leaderboard" },
+  { to: "/bank", label: "Bank" },
 ];
 
 export function NavBar() {

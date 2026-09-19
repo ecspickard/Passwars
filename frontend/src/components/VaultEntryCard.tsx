@@ -1,9 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { useToast } from "../context/ToastContext";
-import { ApiError } from "../lib/api";
 import { revealVaultSecret, type VaultEntry } from "../lib/vault";
-
-const CLIPBOARD_CLEAR_SECONDS = 20;
+import { CopySecretButton } from "./CopySecretButton";
 
 export function VaultEntryCard({
   entry,
@@ -14,70 +10,6 @@ export function VaultEntryCard({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const { showToast } = useToast();
-  const [isCopying, setIsCopying] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
-
-  const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const tickTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Identifies *this* copy's own pending clear, so an older timer can't wipe
-  // out a clipboard write made by a newer copy (this card or another).
-  const copyTokenRef = useRef(0);
-
-  useEffect(() => {
-    return () => {
-      if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
-      if (tickTimerRef.current) clearInterval(tickTimerRef.current);
-    };
-  }, []);
-
-  const handleCopy = async () => {
-    setIsCopying(true);
-    const myToken = ++copyTokenRef.current;
-
-    try {
-      // Fetched fresh on every click and used immediately. This binding is
-      // local to this function call — it is never assigned to component
-      // state, a ref, or anything else that outlives this click.
-      const { secret_value } = await revealVaultSecret(entry.id);
-      await navigator.clipboard.writeText(secret_value);
-
-      showToast(
-        `Copied the password for ${entry.service_name} — clearing in ${CLIPBOARD_CLEAR_SECONDS}s.`,
-        "info",
-      );
-
-      if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
-      if (tickTimerRef.current) clearInterval(tickTimerRef.current);
-
-      setSecondsLeft(CLIPBOARD_CLEAR_SECONDS);
-      tickTimerRef.current = setInterval(() => {
-        setSecondsLeft((s) => (s !== null && s > 1 ? s - 1 : 0));
-      }, 1000);
-
-      clearTimerRef.current = setTimeout(async () => {
-        if (tickTimerRef.current) clearInterval(tickTimerRef.current);
-        // A newer copy has already taken over the clipboard - don't stomp it.
-        if (copyTokenRef.current !== myToken) return;
-        try {
-          await navigator.clipboard.writeText("");
-          showToast("Clipboard cleared.", "success");
-        } catch {
-          // Clipboard access can be revoked (tab lost focus, permission
-          // changed) between the copy and now - nothing left to clean up.
-        }
-        setSecondsLeft(null);
-      }, CLIPBOARD_CLEAR_SECONDS * 1000);
-    } catch (err) {
-      showToast(
-        err instanceof ApiError ? err.message : "Couldn't copy that password. Try again.",
-        "error",
-      );
-    } finally {
-      setIsCopying(false);
-    }
-  };
-
   const addedDate = entry.created_at
     ? new Date(entry.created_at).toLocaleDateString(undefined, {
         year: "numeric",
@@ -98,13 +30,10 @@ export function VaultEntryCard({
       </p>
 
       <div className="flex items-center justify-between gap-2">
-        <button type="button" onClick={handleCopy} className="btn-ghost text-xs" disabled={isCopying}>
-          {isCopying
-            ? "Copying…"
-            : secondsLeft !== null
-              ? `Copied · clears in ${secondsLeft}s`
-              : "Copy password"}
-        </button>
+        <CopySecretButton
+          serviceName={entry.service_name}
+          fetchSecret={async () => (await revealVaultSecret(entry.id)).secret_value}
+        />
         <div className="flex gap-1">
           <button
             type="button"
