@@ -4,14 +4,14 @@ import { useWebSocket } from "../hooks/useWebSocket";
 import { BrandMark } from "./BrandMark";
 import { ChessLinkBadge } from "./ChessLinkBadge";
 import { NotificationBell } from "./NotificationBell";
+import { AudioPlayer } from "./AudioPlayer";
 import { UserMenu } from "./UserMenu";
 
 const LINKS = [
   { to: "/vault", label: "Vault" },
+  { to: "/bank", label: "Bank" },
   { to: "/challenges", label: "Challenge Arena" },
   { to: "/leaderboard", label: "Leaderboard" },
-  { to: "/bank", label: "Bank" },
-  { to: "/settings", label: "Settings" },
 ];
 
 export function NavBar() {
@@ -60,6 +60,7 @@ export function NavBar() {
               title={isConnected ? "Live connection active" : "Reconnecting…"}
               aria-hidden
             />
+            <AudioPlayer />
             <NotificationBell />
             <UserMenu />
           </div>

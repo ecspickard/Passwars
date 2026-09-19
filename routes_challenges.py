@@ -13,10 +13,22 @@ router = APIRouter(prefix="/api/challenges", tags=["challenges"])
 
 
 def _to_response(challenge: Challenge) -> ChallengeResponse:
-    """ChallengeResponse with challenger_name filled in."""
+    """ChallengeResponse with challenger_name and defender_name filled in."""
     data = ChallengeResponse.from_orm(challenge).dict()
-    data["challenger_name"] = challenge.challenger.username
+    data["challenger_name"] = challenge.challenger.username if challenge.challenger else None
+    data["defender_name"] = challenge.defender.username if challenge.defender else None
     return ChallengeResponse(**data)
+
+@router.get("/recent", response_model=List[ChallengeResponse])
+def get_recent_challenges(db: Session = Depends(get_db)):
+    """
+    Get the most recently completed challenges globally for the public feed.
+    """
+    challenges = db.query(Challenge).filter(
+        Challenge.status == "completed"
+    ).order_by(Challenge.completed_at.desc()).limit(15).all()
+
+    return [_to_response(c) for c in challenges]
 
 
 @router.get("/mine", response_model=List[ChallengeResponse])
