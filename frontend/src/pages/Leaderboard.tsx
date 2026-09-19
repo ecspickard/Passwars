@@ -96,7 +96,7 @@ export default function Leaderboard() {
                       <td className="px-4 py-3 font-display text-parchment-50">
                         <span className="text-steel-400 mr-2 font-ui text-sm">#{rank}</span>
                         {chessRank && (
-                          <span aria-hidden className={`${chessRank.className} ${isMac ? '-translate-y-px' : ''}`} title={`Rank ${rank}`}>{chessRank.icon}</span>
+                          <span aria-hidden className={`${chessRank.className} ${isMac ? '-translate-y-px' : 'translate-y-px'}`} title={`Rank ${rank}`}>{chessRank.icon}</span>
                         )}
                         {chessRank && <span className="sr-only">Rank {rank}</span>}
                       </td>

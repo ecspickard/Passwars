@@ -146,7 +146,7 @@ export default function Profile() {
             <div className="flex items-center gap-2">
               <span className="font-ui text-2xl text-steel-400">#{rank.rank}</span>
               {CHESS_RANK[rank.rank] && (
-                <span className={`font-display text-4xl ${CHESS_RANK[rank.rank].className} ${isMac ? '-translate-y-[5px]' : ''}`} aria-hidden>
+                <span className={`font-display text-4xl ${CHESS_RANK[rank.rank].className} ${isMac ? '-translate-y-[5px]' : 'translate-y-px'}`} aria-hidden>
                   {CHESS_RANK[rank.rank].icon}
                 </span>
               )}
