@@ -1,4 +1,4 @@
-#!/Users/ethansmith/Documents/passwars/Passwars/venv/bin/python3.12
+#!/Users/ethansmith/Documents/Hackathon/Passwars/venv/bin/python3.12
 import sys
 from uvicorn.main import main
 if __name__ == '__main__':

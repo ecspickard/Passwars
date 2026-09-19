@@ -5,7 +5,7 @@ import { ChessRatingBadge } from "./ChessRatingBadge";
 /** An existing pending/accepted challenge between you and this player. */
 export type Outstanding =
   | { kind: "sent" }
-  | { kind: "received" }
+  | { kind: "received"; challengeId: number }
   | { kind: "active"; challengeId: number };
 
 const STATUS_CHIP =
@@ -22,6 +22,8 @@ export function PlayerCard({
   serviceFilter: string;
   outstanding?: Outstanding;
   onChallenge: () => void;
+  onAccept?: (challengeId: number) => void;
+  onDecline?: (challengeId: number) => void;
 }) {
   const count = player.password_count;
 
@@ -63,9 +65,25 @@ export function PlayerCard({
             <span aria-hidden>♟</span> Challenge sent, waiting for a reply
           </span>
         ) : outstanding?.kind === "received" ? (
-          <span className={STATUS_CHIP} role="status">
-            <span aria-hidden>♟</span> This player has challenged you
-          </span>
+          <div className="flex items-center gap-2">
+            <span className={STATUS_CHIP} role="status">
+              <span aria-hidden>♟</span> Challenged you
+            </span>
+            <button 
+              type="button" 
+              className="btn-ghost py-1 px-2 text-xs" 
+              onClick={() => onDecline?.(outstanding.challengeId)}
+            >
+              Decline
+            </button>
+            <button 
+              type="button" 
+              className="btn-gold py-1 px-2 text-xs" 
+              onClick={() => onAccept?.(outstanding.challengeId)}
+            >
+              Accept
+            </button>
+          </div>
         ) : outstanding?.kind === "active" ? (
           <Link to={`/challenges/${outstanding.challengeId}`} className="btn-ghost text-sm">
             Game in progress

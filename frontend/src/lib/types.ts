@@ -6,6 +6,7 @@ export interface User {
   id: number;
   username: string;
   email: string;
+  created_at: string;
   chess_username?: string | null; // extended
   chess_verified_at?: string | null; // extended — set once ownership is verified
 }
@@ -60,7 +61,7 @@ export interface Challenge {
   challenger_service: string;
   defender_service: string;
   challenger_name: string;
-  status: "pending" | "accepted" | "denied" | "completed" | "expired";
+  status: "pending" | "accepted" | "rejected" | "completed" | "expired";
   winner_id?: number | null;
   accepted_at?: string | null; // extended
   source?: ChallengeSource; // extended

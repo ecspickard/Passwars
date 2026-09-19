@@ -1,21 +1,23 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Header
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
 from sqlalchemy.orm import Session
 from sqlalchemy import func, exc
 from typing import List
-from datetime import datetime
+from pydantic import BaseModel
 from database import get_db
-from models import User, UserPassword, PasswordBank
+from models import User, UserPassword, PasswordBank, PasswordAuditLog
 from schemas import (
     PasswordAddRequest, PasswordUpdateRequest, PasswordResponse, PasswordBankResponse,
-    PlayerResponse, LeaderboardResponse, UserResponse, SecretRevealResponse,
-    ChessUsernameStartRequest, ChessUsernameStartResponse, ChessUsernameVerifyResponse
+    PlayerResponse, LeaderboardResponse, UserResponse, UserProfileUpdateRequest,
+    AccountDeleteRequest
 )
-from utils import decode_token, encrypt_secret, decrypt_secret, generate_verification_code
+from utils import decode_token, encrypt_password, decrypt_password, verify_password, hash_password
 from chess_api import chess_user_exists, verify_ownership_via_location
+import uuid
+from datetime import datetime
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
-def get_current_user(token: str = Header(None, alias="Authorization"), db: Session = Depends(get_db)) -> User:
+def get_current_user(token: str, db: Session = Depends(get_db)) -> User:
     """Get current user from JWT token"""
     if not token or not token.startswith("Bearer "):
         raise HTTPException(
@@ -43,13 +45,24 @@ def get_current_user(token: str = Header(None, alias="Authorization"), db: Sessi
     
     return user
 
+def log_password_access(db: Session, user_id: int, password_id: int, action: str, ip_address: str = None):
+    """Log password access for audit trail"""
+    audit_log = PasswordAuditLog(
+        user_id=user_id,
+        password_id=password_id,
+        action=action,
+        ip_address=ip_address
+    )
+    db.add(audit_log)
+    db.commit()
+
 @router.post("/passwords", response_model=PasswordResponse, status_code=status.HTTP_201_CREATED)
 def add_password(
     request: PasswordAddRequest,
     authorization: str = Header(None),
     db: Session = Depends(get_db)
 ):
-    """Add a password offering. The secret is encrypted before it touches the database."""
+    """Add a password offering"""
     
     current_user = get_current_user(authorization, db)
     
@@ -57,7 +70,7 @@ def add_password(
         new_password = UserPassword(
             user_id=current_user.id,
             service_name=request.service_name,
-            secret_value=encrypt_secret(request.secret_value)
+            secret_value=encrypt_password(request.password_value)
         )
         db.add(new_password)
         db.commit()
@@ -71,21 +84,12 @@ def add_password(
         )
 
 @router.get("/passwords", response_model=List[PasswordResponse])
-def list_passwords(
+def get_passwords(
     authorization: str = Header(None),
     db: Session = Depends(get_db)
 ):
-    """List the current user's own password offerings (vault view). Never
-    returns secret_value - that only ever comes back from the reveal
-    endpoint below, fetched fresh and on demand."""
-
     current_user = get_current_user(authorization, db)
-
-    offerings = db.query(UserPassword).filter(
-        UserPassword.user_id == current_user.id
-    ).order_by(UserPassword.created_at.desc()).all()
-
-    return [PasswordResponse.from_orm(p) for p in offerings]
+    return db.query(UserPassword).filter(UserPassword.user_id == current_user.id).all()
 
 @router.patch("/passwords/{password_id}", response_model=PasswordResponse)
 def update_password(
@@ -94,36 +98,19 @@ def update_password(
     authorization: str = Header(None),
     db: Session = Depends(get_db)
 ):
-    """Rename a service and/or rotate its stored secret. Both fields are
-    optional on the request - send only what changed. A new secret_value is
-    re-encrypted before storage, same as on creation."""
-
     current_user = get_current_user(authorization, db)
-
-    offering = db.query(UserPassword).filter(
-        UserPassword.id == password_id,
-        UserPassword.user_id == current_user.id
-    ).first()
-
-    if not offering:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offering not found")
-
+    pwd = db.query(UserPassword).filter(UserPassword.id == password_id, UserPassword.user_id == current_user.id).first()
+    if not pwd:
+        raise HTTPException(status_code=404, detail="Password not found")
+    
     if request.service_name is not None:
-        offering.service_name = request.service_name
+        pwd.service_name = request.service_name
     if request.secret_value is not None:
-        offering.secret_value = encrypt_secret(request.secret_value)
-
-    try:
-        db.commit()
-        db.refresh(offering)
-    except exc.IntegrityError:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Already offering this service"
-        )
-
-    return PasswordResponse.from_orm(offering)
+        pwd.secret_value = encrypt_password(request.secret_value)
+        
+    db.commit()
+    db.refresh(pwd)
+    return pwd
 
 @router.delete("/passwords/{password_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_password(
@@ -131,29 +118,30 @@ def delete_password(
     authorization: str = Header(None),
     db: Session = Depends(get_db)
 ):
-    """Remove one of the current user's own password offerings.
-
-    TODO(product): this doesn't yet check whether the service is currently
-    wagered in a pending/accepted Challenge. challenge_service.py looks up
-    the loser's UserPassword by (user_id, service_name) at resolution time,
-    so deleting a staked entry could make an in-flight challenge
-    unresolvable. Needs a "can't delete a staked service" rule (or a
-    snapshot of the secret at challenge-accept time) before this ships -
-    out of scope for the vault CRUD work itself.
-    """
-
     current_user = get_current_user(authorization, db)
-
-    offering = db.query(UserPassword).filter(
-        UserPassword.id == password_id,
-        UserPassword.user_id == current_user.id
-    ).first()
-
-    if not offering:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offering not found")
-
-    db.delete(offering)
+    pwd = db.query(UserPassword).filter(UserPassword.id == password_id, UserPassword.user_id == current_user.id).first()
+    if not pwd:
+        raise HTTPException(status_code=404, detail="Password not found")
+    db.delete(pwd)
     db.commit()
+    return None
+
+@router.get("/passwords/{password_id}/reveal")
+def reveal_own_password(
+    password_id: int,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    current_user = get_current_user(authorization, db)
+    pwd = db.query(UserPassword).filter(UserPassword.id == password_id, UserPassword.user_id == current_user.id).first()
+    if not pwd:
+        raise HTTPException(status_code=404, detail="Password not found")
+    
+    return {
+        "id": pwd.id,
+        "service_name": pwd.service_name,
+        "secret_value": decrypt_password(pwd.secret_value)
+    }
 
 @router.get("/players", response_model=List[PlayerResponse])
 def get_players(db: Session = Depends(get_db)):
@@ -164,22 +152,18 @@ def get_players(db: Session = Depends(get_db)):
     
     for user in users:
         services = [p.service_name for p in user.password_offerings]
-        players.append(PlayerResponse(
-            id=user.id,
-            username=user.username,
-            services=services,
-            # Only reveal the handle once ownership is verified.
-            chess_username=user.chess_username if user.chess_verified_at else None,
-        ))
+        chess_name = user.chess_username if user.chess_verified_at else None
+        players.append(PlayerResponse(id=user.id, username=user.username, services=services, chess_username=chess_name))
     
     return sorted(players, key=lambda x: x.username)
 
 @router.get("/password-bank", response_model=List[PasswordBankResponse])
 def get_password_bank(
     authorization: str = Header(None),
+    request: Request = None,
     db: Session = Depends(get_db)
 ):
-    """Get current user's collected password bank"""
+    """Get current user's collected password bank (encrypted)"""
     
     current_user = get_current_user(authorization, db)
     
@@ -187,21 +171,59 @@ def get_password_bank(
         PasswordBank.user_id == current_user.id
     ).order_by(PasswordBank.collected_at.desc()).all()
     
+    # Log access to password bank
+    ip_address = request.client.host if request else None
+    for pwd in passwords:
+        log_password_access(db, current_user.id, pwd.id, "viewed", ip_address)
+    
     return [PasswordBankResponse.from_orm(p) for p in passwords]
+
+
+@router.get("/password-bank/{password_id}/reveal")
+def reveal_password(
+    password_id: int,
+    authorization: str = Header(None),
+    request: Request = None,
+    db: Session = Depends(get_db)
+):
+    """Reveal/decrypt a collected password (secure endpoint)"""
+    
+    current_user = get_current_user(authorization, db)
+    
+    pwd = db.query(PasswordBank).filter(PasswordBank.id == password_id).first()
+    
+    if not pwd:
+        raise HTTPException(status_code=404, detail="Password not found")
+    
+    # CRITICAL: Only owner can view
+    if pwd.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Log the reveal action
+    ip_address = request.client.host if request else None
+    log_password_access(db, current_user.id, password_id, "revealed", ip_address)
+    
+    # Decrypt and return
+    try:
+        plaintext = decrypt_password(pwd.secret_value)
+        return {
+            "service_name": pwd.service_name,
+            "password": plaintext,
+            "collected_from": pwd.collected_from,
+            "collected_at": pwd.collected_at
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to decrypt password")
 
 @router.get("/leaderboard", response_model=List[LeaderboardResponse])
 def get_leaderboard(db: Session = Depends(get_db), limit: int = 50):
     """Get top players by password count"""
     
-    # PasswordBank has two FKs to users (user_id and collected_from), so the
-    # join condition has to be explicit or SQLAlchemy can't pick one.
     results = db.query(
         User.id,
         User.username,
         func.count(PasswordBank.id).label("password_count")
-    ).outerjoin(
-        PasswordBank, PasswordBank.user_id == User.id
-    ).group_by(User.id, User.username).order_by(
+    ).outerjoin(PasswordBank, PasswordBank.user_id == User.id).group_by(User.id, User.username).order_by(
         func.count(PasswordBank.id).desc()
     ).limit(limit).all()
     
@@ -252,136 +274,130 @@ def get_current_user_info(
     return UserResponse.from_orm(current_user)
 
 
-@router.get("/passwords/{password_id}/reveal", response_model=SecretRevealResponse)
-def reveal_offering_secret(
-    password_id: int,
+@router.put("/profile", response_model=UserResponse, status_code=status.HTTP_200_OK)
+def update_profile(
+    request: UserProfileUpdateRequest,
     authorization: str = Header(None),
     db: Session = Depends(get_db)
 ):
-    """Decrypt and return one of the current user's own offered secrets."""
-
+    """Update current user's profile (username and/or email)"""
+    
     current_user = get_current_user(authorization, db)
+    
+    # Check if new username already exists (if provided and different)
+    if request.username and request.username != current_user.username:
+        existing = db.query(User).filter(User.username == request.username).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username already taken"
+            )
+        current_user.username = request.username
+    
+    # Check if new email already exists (if provided and different)
+    if request.email and request.email != current_user.email:
+        existing = db.query(User).filter(User.email == request.email).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already in use"
+            )
+        current_user.email = request.email
+    
+    db.commit()
+    db.refresh(current_user)
+    
+    return UserResponse.from_orm(current_user)
 
-    offering = db.query(UserPassword).filter(
-        UserPassword.id == password_id,
-        UserPassword.user_id == current_user.id
-    ).first()
 
-    if not offering:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offering not found")
-
-    return SecretRevealResponse(
-        id=offering.id,
-        service_name=offering.service_name,
-        secret_value=decrypt_secret(offering.secret_value)
-    )
-
-
-@router.get("/password-bank/{entry_id}/reveal", response_model=SecretRevealResponse)
-def reveal_bank_secret(
-    entry_id: int,
+@router.delete("/account", status_code=status.HTTP_204_NO_CONTENT)
+def delete_account(
+    request: AccountDeleteRequest,
     authorization: str = Header(None),
     db: Session = Depends(get_db)
 ):
-    """Decrypt and return a secret the current user has won into their bank."""
-
+    """Delete current user's account (requires password confirmation)"""
+    
     current_user = get_current_user(authorization, db)
-
-    entry = db.query(PasswordBank).filter(
-        PasswordBank.id == entry_id,
-        PasswordBank.user_id == current_user.id
-    ).first()
-
-    if not entry:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Password bank entry not found")
-
-    return SecretRevealResponse(
-        id=entry.id,
-        service_name=entry.service_name,
-        secret_value=decrypt_secret(entry.secret_value)
-    )
-
-
-@router.post("/chess-username/start", response_model=ChessUsernameStartResponse)
-def start_chess_username_verification(
-    request: ChessUsernameStartRequest,
-    authorization: str = Header(None),
-    db: Session = Depends(get_db)
-):
-    """
-    Step 1 of linking a Chess.com account: confirm the username exists, then
-    hand back a one-time code for the user to paste into their Chess.com
-    profile's "Location" field so ownership can be confirmed in step 2.
-    """
-
-    current_user = get_current_user(authorization, db)
-
-    if not chess_user_exists(request.chess_username):
+    
+    # Verify password for security
+    if not verify_password(request.password, current_user.password_hash):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No Chess.com account found with that username"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid password"
         )
+    
+    # Delete user (cascades to all related data via ondelete="CASCADE")
+    db.delete(current_user)
+    db.commit()
+    
+    return None
 
-    code = generate_verification_code()
+class ChessStartRequest(BaseModel):
+    chess_username: str
+
+@router.post("/chess-username/start")
+def start_chess_link(
+    request: ChessStartRequest,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Start linking a chess account"""
+    current_user = get_current_user(authorization, db)
+    
+    if not chess_user_exists(request.chess_username):
+        raise HTTPException(status_code=400, detail="Chess.com user not found")
+        
+    code = f"PW-{str(uuid.uuid4())[:8].upper()}"
+    
     current_user.chess_username = request.chess_username
     current_user.chess_verification_code = code
     current_user.chess_verified_at = None
     db.commit()
+    
+    return {
+        "chess_username": request.chess_username,
+        "verification_code": code,
+        "instructions": "Add this code to the 'Location' field of your Chess.com profile."
+    }
 
-    return ChessUsernameStartResponse(
-        chess_username=request.chess_username,
-        verification_code=code,
-        instructions=(
-            f"Paste '{code}' into the Location field of your Chess.com profile, "
-            "then call /chess-username/verify. You can remove it afterward."
-        )
-    )
-
-
-@router.post("/chess-username/verify", response_model=ChessUsernameVerifyResponse)
-def verify_chess_username(
+@router.post("/chess-username/verify")
+def verify_chess_link(
     authorization: str = Header(None),
     db: Session = Depends(get_db)
 ):
-    """Step 2: confirm the verification code is present on the linked Chess.com profile."""
-
+    """Verify the chess account link"""
     current_user = get_current_user(authorization, db)
-
+    
     if not current_user.chess_username or not current_user.chess_verification_code:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Start chess-username verification first"
-        )
-
-    verified = verify_ownership_via_location(
-        current_user.chess_username, current_user.chess_verification_code
-    )
-
-    if verified:
+        raise HTTPException(status_code=400, detail="No chess link in progress")
+        
+    is_verified = verify_ownership_via_location(current_user.chess_username, current_user.chess_verification_code)
+    
+    if is_verified:
         current_user.chess_verified_at = datetime.utcnow()
-        current_user.chess_verification_code = None
         db.commit()
-
-    return ChessUsernameVerifyResponse(
-        chess_username=current_user.chess_username,
-        verified=verified,
-        verified_at=current_user.chess_verified_at
-    )
-
+        return {
+            "chess_username": current_user.chess_username,
+            "verified": True,
+            "verified_at": current_user.chess_verified_at
+        }
+    else:
+        return {
+            "chess_username": current_user.chess_username,
+            "verified": False,
+            "verified_at": None
+        }
 
 @router.delete("/chess-username", status_code=status.HTTP_204_NO_CONTENT)
-def unlink_chess_username(
+def unlink_chess_account(
     authorization: str = Header(None),
     db: Session = Depends(get_db)
 ):
-    """
-    Remove the linked Chess.com account entirely (whether or not it was
-    verified). A fresh start()/verify() is required to link again — nothing
-    carries over.
-    """
+    """Unlink chess account"""
     current_user = get_current_user(authorization, db)
-
     current_user.chess_username = None
     current_user.chess_verification_code = None
     current_user.chess_verified_at = None
     db.commit()
+    return None

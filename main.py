@@ -4,16 +4,13 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, update
 from datetime import datetime
 import os
-import asyncio
 
 from database import init_db, get_db, SessionLocal
-from models import Challenge, User
+from models import Challenge, PasswordBank, User, UserPassword
+from utils import encrypt_password
 from routes_auth import router as auth_router
 from routes_users import router as users_router
 from routes_challenges import router as challenges_router
-from connection_manager import manager
-from challenge_service import complete_challenge, VALID_RESULT_SOURCES
-from background_tasks import poll_accepted_challenges
 
 # Initialize database
 init_db()
@@ -34,16 +31,47 @@ app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(challenges_router)
 
-@app.on_event("startup")
-async def start_background_tasks():
-    asyncio.create_task(poll_accepted_challenges())
-
 # Health check
 @app.get("/api/health")
 def health_check():
     return {"status": "Server is running"}
 
+# WebSocket connection manager
+from typing import List, Dict
 from fastapi import WebSocket
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[int, WebSocket] = {}
+        self.active_games: Dict[int, dict] = {}
+
+    async def connect(self, user_id: int, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections[user_id] = websocket
+
+    def disconnect(self, user_id: int):
+        if user_id in self.active_connections:
+            del self.active_connections[user_id]
+
+    async def send_to_user(self, user_id: int, message: dict):
+        print(f"[ws] send_to_user({user_id}), connected users: {list(self.active_connections.keys())}")
+        if user_id in self.active_connections:
+            try:
+                await self.active_connections[user_id].send_json(message)
+                print(f"[ws] message sent to user {user_id}: {message.get('type')}")
+            except Exception as e:
+                print(f"Error sending message to user {user_id}: {e}")
+        else:
+            print(f"[ws] user {user_id} not connected, message dropped: {message.get('type')}")
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections.values():
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                print(f"Error broadcasting message: {e}")
+
+manager = ConnectionManager()
 
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(user_id: int, websocket: WebSocket):
@@ -95,37 +123,30 @@ async def websocket_endpoint(user_id: int, websocket: WebSocket):
             elif event_type == "accept_challenge":
                 # Challenge accepted
                 challenge_id = data.get("challenge_id")
-
+                
                 db = SessionLocal()
                 challenge = db.query(Challenge).filter(Challenge.id == challenge_id).first()
                 if challenge:
                     challenge.status = "accepted"
-                    challenge.accepted_at = datetime.utcnow()
                     db.commit()
-
-                    challenger = challenge.challenger
-                    defender = challenge.defender
-
-                    # Notify challenger — include the defender's chess.com username so
-                    # the frontend can tell them who/where to play.
-                    await manager.send_to_user(
-                        challenge.challenger_id,
-                        {
-                            "type": "challenge_accepted",
-                            "challenge_id": challenge_id,
-                            "opponent_chess_username": defender.chess_username
-                        }
-                    )
-
-                    # Notify defender — same, but with the challenger's username.
-                    await manager.send_to_user(
-                        challenge.defender_id,
-                        {
-                            "type": "challenge_accepted",
-                            "challenge_id": challenge_id,
-                            "opponent_chess_username": challenger.chess_username
-                        }
-                    )
+                
+                # Notify challenger
+                await manager.send_to_user(
+                    challenge.challenger_id,
+                    {
+                        "type": "challenge_accepted",
+                        "challenge_id": challenge_id
+                    }
+                )
+                
+                # Notify defender
+                await manager.send_to_user(
+                    challenge.defender_id,
+                    {
+                        "type": "challenge_accepted",
+                        "challenge_id": challenge_id
+                    }
+                )
                 db.close()
 
             elif event_type == "deny_challenge":
@@ -137,15 +158,15 @@ async def websocket_endpoint(user_id: int, websocket: WebSocket):
                 if challenge:
                     challenge.status = "rejected"
                     db.commit()
-
-                    # Notify challenger
-                    await manager.send_to_user(
-                        challenge.challenger_id,
-                        {
-                            "type": "challenge_denied",
-                            "challenge_id": challenge_id
-                        }
-                    )
+                
+                # Notify challenger
+                await manager.send_to_user(
+                    challenge.challenger_id,
+                    {
+                        "type": "challenge_denied",
+                        "challenge_id": challenge_id
+                    }
+                )
                 db.close()
 
             elif event_type == "game_move":
@@ -168,52 +189,48 @@ async def websocket_endpoint(user_id: int, websocket: WebSocket):
                 # Game finished - transfer password to winner
                 challenge_id = data.get("challenge_id")
                 winner_id = data.get("winner_id")
-                # "auto" = matched via the Chess.com API, "self_reported" = players
-                # confirmed the result themselves (the default, for backward compatibility)
-                source = data.get("source", "self_reported")
-
-                if source not in VALID_RESULT_SOURCES:
-                    await manager.send_to_user(user_id, {
-                        "type": "error",
-                        "message": f"Invalid result source: {source}"
-                    })
-                    continue
 
                 db = SessionLocal()
                 challenge = db.query(Challenge).filter(Challenge.id == challenge_id).first()
-
+                
                 if challenge:
-                    try:
-                        complete_challenge(db, challenge, winner_id, source)
-                    except ValueError as e:
-                        db.close()
-                        await manager.send_to_user(user_id, {
-                            "type": "error",
-                            "message": str(e)
-                        })
-                    else:
-                        # Notify just the two players, not every connected user
-                        await manager.send_to_user(
-                            challenge.challenger_id,
-                            {
-                                "type": "game_ended",
-                                "challenge_id": challenge_id,
-                                "winner_id": winner_id,
-                                "source": source
-                            }
-                        )
-                        await manager.send_to_user(
-                            challenge.defender_id,
-                            {
-                                "type": "game_ended",
-                                "challenge_id": challenge_id,
-                                "winner_id": winner_id,
-                                "source": source
-                            }
-                        )
-                        db.close()
-                else:
-                    db.close()
+                    loser_id = challenge.defender_id if winner_id == challenge.challenger_id else challenge.challenger_id
+                    loser_service = challenge.defender_service if winner_id == challenge.challenger_id else challenge.challenger_service
+
+                    # Find loser's password value
+                    loser_password = db.query(UserPassword).filter(
+                        UserPassword.user_id == loser_id,
+                        UserPassword.service_name == loser_service
+                    ).first()
+                    
+                    secret_value = loser_password.secret_value if loser_password else encrypt_password("unknown")
+
+                    # Add password to winner's bank
+                    password_bank = PasswordBank(
+                        user_id=winner_id,
+                        service_name=loser_service,
+                        collected_from=loser_id,
+                        secret_value=secret_value
+                    )
+                    db.add(password_bank)
+
+                    # Update challenge
+                    challenge.winner_id = winner_id
+                    challenge.status = "completed"
+                    challenge.completed_at = datetime.utcnow()
+                    
+                    db.commit()
+
+                    # Notify both players
+                    await manager.broadcast(
+                        {
+                            "type": "game_ended",
+                            "challenge_id": challenge_id,
+                            "winner_id": winner_id
+                        }
+                    )
+
+                db.close()
 
     except Exception as e:
         print(f"WebSocket error for user {user_id}: {e}")

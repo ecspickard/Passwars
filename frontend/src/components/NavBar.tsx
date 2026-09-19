@@ -10,6 +10,7 @@ const LINKS = [
   { to: "/challenges", label: "Challenge Arena" },
   { to: "/leaderboard", label: "Leaderboard" },
   { to: "/bank", label: "Bank" },
+  { to: "/settings", label: "Settings" },
 ];
 
 export function NavBar() {

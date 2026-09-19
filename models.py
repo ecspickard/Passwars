@@ -35,7 +35,7 @@ class UserPassword(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     service_name = Column(String(100), nullable=False)
-    secret_value = Column(String(500), nullable=False)
+    secret_value = Column(String(255), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
     __table_args__ = (UniqueConstraint('user_id', 'service_name', name='unique_user_service'),)
@@ -52,7 +52,7 @@ class PasswordBank(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     service_name = Column(String(100), nullable=False)
-    secret_value = Column(String(500), nullable=False)
+    secret_value = Column(String(255), nullable=False)
     collected_from = Column(Integer, ForeignKey("users.id"), nullable=True)
     collected_at = Column(DateTime, server_default=func.now())
 
@@ -101,3 +101,22 @@ class GameMove(Base):
 
     def __repr__(self):
         return f"<GameMove(challenge_id={self.challenge_id}, move={self.move})>"
+
+
+class PasswordAuditLog(Base):
+    __tablename__ = "password_audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    password_id = Column(Integer, ForeignKey("password_bank.id", ondelete="CASCADE"), nullable=False)
+    action = Column(String(50), nullable=False)  # "viewed", "revealed", "collected"
+    ip_address = Column(String(50), nullable=True)
+    accessed_at = Column(DateTime, server_default=func.now())
+
+    # Relationships
+    user = relationship("User")
+    password_bank = relationship("PasswordBank")
+
+    def __repr__(self):
+        return f"<PasswordAuditLog(user_id={self.user_id}, action={self.action})>"
+    

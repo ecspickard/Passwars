@@ -14,7 +14,7 @@ const REFRESH_EVENTS = ["challenge_received", "challenge_accepted", "challenge_d
 
 export default function Challenges() {
   const { user } = useAuth();
-  const { subscribe } = useWebSocket();
+  const { subscribe, send } = useWebSocket();
 
   const [players, setPlayers] = useState<Player[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -65,7 +65,7 @@ export default function Challenges() {
       const otherId = c.challenger_id === myId ? c.defender_id : c.challenger_id;
       if (map.get(otherId)?.kind === "active") continue;
       if (c.status === "accepted") map.set(otherId, { kind: "active", challengeId: c.id });
-      else map.set(otherId, c.challenger_id === myId ? { kind: "sent" } : { kind: "received" });
+      else map.set(otherId, c.challenger_id === myId ? { kind: "sent" } : { kind: "received", challengeId: c.id });
     }
     for (const id of justSentTo) if (!map.has(id)) map.set(id, { kind: "sent" });
     return map;
@@ -167,6 +167,8 @@ export default function Challenges() {
                 serviceFilter={serviceFilter}
                 outstanding={outstandingByPlayer.get(player.id)}
                 onChallenge={() => setChallenging(player)}
+                onAccept={(challengeId) => send({ type: "accept_challenge", challenge_id: challengeId })}
+                onDecline={(challengeId) => send({ type: "deny_challenge", challenge_id: challengeId })}
               />
             ))}
           </div>

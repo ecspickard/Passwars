@@ -39,15 +39,19 @@ class UserProfileResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class UserProfileUpdateRequest(BaseModel):
+    username: Optional[str] = None
+    email: Optional[EmailStr] = None
+
+class AccountDeleteRequest(BaseModel):
+    password: str  # Require password confirmation for deletion
+
 # Password Schemas
 class PasswordAddRequest(BaseModel):
     service_name: str
-    secret_value: str  # the actual wagered secret; encrypted before storage
+    password_value: str
 
 class PasswordUpdateRequest(BaseModel):
-    """Both fields optional - PATCH sends only what changed. A blank/omitted
-    secret_value means "keep the existing secret"; the frontend enforces
-    this by only including the field when the user typed a new one."""
     service_name: Optional[str] = None
     secret_value: Optional[str] = None
 
@@ -68,13 +72,6 @@ class PasswordBankResponse(BaseModel):
 
     class Config:
         from_attributes = True
-
-class SecretRevealResponse(BaseModel):
-    """Returned only by the reveal-on-demand endpoints - never embedded in
-    the plain list/bank responses above."""
-    id: int
-    service_name: str
-    secret_value: str
 
 # Player List Schemas
 class PlayerResponse(BaseModel):
@@ -105,10 +102,10 @@ class ChallengeResponse(BaseModel):
     defender_service: str
     status: str
     winner_id: Optional[int]
-    result_source: Optional[str]
     created_at: datetime
-    accepted_at: Optional[datetime]
-    completed_at: Optional[datetime]
+    accepted_at: Optional[datetime] = None
+    result_source: Optional[str] = None
+    challenger_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -139,16 +136,7 @@ class GameResultRequest(BaseModel):
     challenge_id: int
     winner_id: int
 
-# Chess.com Account Linking Schemas
-class ChessUsernameStartRequest(BaseModel):
+# Chess Schemas
+class ChessStartRequest(BaseModel):
     chess_username: str
-
-class ChessUsernameStartResponse(BaseModel):
-    chess_username: str
-    verification_code: str
-    instructions: str
-
-class ChessUsernameVerifyResponse(BaseModel):
-    chess_username: str
-    verified: bool
-    verified_at: Optional[datetime]
+    

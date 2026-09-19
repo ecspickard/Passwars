@@ -8,6 +8,7 @@ export interface ChallengeRecord {
   id: number;
   challenger_id: number;
   defender_id: number;
+  challenger_name: string;
   challenger_service: string;
   defender_service: string;
   status: string; // "pending" | "accepted" | "completed" | "rejected"
