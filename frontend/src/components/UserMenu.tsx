@@ -43,7 +43,7 @@ export function UserMenu() {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 rounded-panel border border-ink-700 px-3 py-1.5 text-sm text-parchment-100 transition-colors hover:border-gold-500"
+        className="flex shrink-0 items-center gap-1.5 lg:gap-2 rounded-panel border border-ink-700 px-2 lg:px-3 py-1.5 text-sm text-parchment-100 transition-colors hover:border-gold-500"
         aria-haspopup="menu"
         aria-expanded={open}
       >
@@ -54,13 +54,14 @@ export function UserMenu() {
             {user.username.slice(0, 1).toUpperCase()}
           </span>
         )}
-        {user.username}
+        <span className="hidden md:inline">{user.username}</span>
       </button>
 
-      {open && (
         <div
           role="menu"
-          className="panel absolute right-0 z-40 mt-2 w-44 overflow-hidden py-1 shadow-lg shadow-black/40"
+          className={`panel absolute right-0 z-40 mt-2 w-44 overflow-hidden py-1 shadow-lg shadow-black/40 origin-top-right transition-all duration-300 ease-out ${
+            open ? "scale-100 opacity-100 visible" : "scale-95 opacity-0 invisible"
+          }`}
         >
           <Link
             to={`/profile/${user.id}`}
@@ -87,7 +88,6 @@ export function UserMenu() {
             Log out
           </button>
         </div>
-      )}
     </div>
   );
 }

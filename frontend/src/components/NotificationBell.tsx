@@ -64,8 +64,9 @@ export function NotificationBell() {
         )}
       </button>
 
-      {open && (
-        <div className="panel absolute right-0 z-40 mt-2 w-80 max-w-[90vw] p-2">
+        <div className={`panel fixed right-4 top-16 z-50 w-80 max-w-[90vw] p-2 md:absolute md:right-0 md:top-auto md:mt-2 md:z-40 origin-top-right transition-all duration-300 ease-out ${
+          open ? "scale-100 opacity-100 visible" : "scale-95 opacity-0 invisible"
+        }`}>
           {notifications.length === 0 ? (
             <p className="p-3 text-center text-sm text-steel-400">No notifications yet.</p>
           ) : (
@@ -102,7 +103,6 @@ export function NotificationBell() {
             </ul>
           )}
         </div>
-      )}
     </div>
   );
 }

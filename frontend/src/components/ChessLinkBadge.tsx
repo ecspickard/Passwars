@@ -6,7 +6,7 @@ export function ChessLinkBadge() {
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-panel border px-2.5 py-1 text-xs font-medium ${
+      className={`inline-flex shrink-0 items-center gap-1 lg:gap-1.5 rounded-panel border px-1.5 lg:px-2.5 py-1 text-xs font-medium ${
         verified ? "border-felt-500 text-felt-500" : "border-signal-500 text-signal-500"
       }`}
       title={
@@ -16,7 +16,7 @@ export function ChessLinkBadge() {
       }
     >
       <span aria-hidden>{verified ? "♞" : "♟"}</span>
-      {verified ? user?.chess_username : "Not linked"}
+      <span className="hidden md:inline">{verified ? user?.chess_username : "Not linked"}</span>
     </span>
   );
 }
