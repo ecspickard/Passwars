@@ -55,7 +55,9 @@ export function NavBar() {
         {user && (
           <div className="flex items-center gap-1 md:gap-3">
             <ChessLinkBadge />
-            <AudioPlayer />
+            <div className="ml-1 md:ml-2">
+              <AudioPlayer />
+            </div>
             <NotificationBell />
             <UserMenu />
             <button

@@ -19,7 +19,8 @@ export default function Challenges() {
 
   const [players, setPlayers] = useState<Player[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [serviceFilter, setServiceFilter] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [onlyLinked, setOnlyLinked] = useState(false);
   const [sort, setSort] = useState<PlayerSort>("most");
   const [challenging, setChallenging] = useState<Player | null>(null);
 
@@ -102,8 +103,8 @@ export default function Challenges() {
   }, [players, eligible, searchParams, setSearchParams]);
 
   const visible = useMemo(
-    () => filterAndSortPlayers(eligible, { service: serviceFilter, sort }),
-    [eligible, serviceFilter, sort],
+    () => filterAndSortPlayers(eligible, { query: searchQuery, onlyLinked, sort }),
+    [eligible, searchQuery, onlyLinked, sort],
   );
 
   const handleSent = (defenderId: number) => {
@@ -134,14 +135,25 @@ export default function Challenges() {
       )}
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <input
-          type="search"
-          placeholder="Filter by service…"
-          value={serviceFilter}
-          onChange={(e) => setServiceFilter(e.target.value)}
-          className="input-field max-w-xs"
-          aria-label="Filter players by an offered service"
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            type="search"
+            placeholder="Search username or service…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="input-field max-w-xs"
+            aria-label="Search players by username or service"
+          />
+          <label className="flex items-center gap-2 text-sm text-parchment-100">
+            <input
+              type="checkbox"
+              checked={onlyLinked}
+              onChange={(e) => setOnlyLinked(e.target.checked)}
+              className="rounded border-ink-700 bg-ink-900 text-gold-500 focus:ring-gold-500"
+            />
+            Only linked accounts
+          </label>
+        </div>
         <label className="flex items-center gap-2 text-sm text-steel-400">
           Sort by
           <select
@@ -173,9 +185,9 @@ export default function Challenges() {
         </div>
       ) : players && visible.length === 0 ? (
         <div className="panel flex flex-col items-center gap-3 p-8 text-center text-steel-400">
-          <p>No player offers a service matching &ldquo;{serviceFilter.trim()}&rdquo;.</p>
-          <button type="button" className="btn-ghost" onClick={() => setServiceFilter("")}>
-            Clear filter
+          <p>No players found matching your filters.</p>
+          <button type="button" className="btn-ghost" onClick={() => { setSearchQuery(""); setOnlyLinked(false); }}>
+            Clear filters
           </button>
         </div>
       ) : players ? (
@@ -188,7 +200,7 @@ export default function Challenges() {
               <PlayerCard
                 key={player.id}
                 player={player}
-                serviceFilter={serviceFilter}
+                serviceFilter={searchQuery}
                 outstanding={outstandingByPlayer.get(player.id)}
                 onChallenge={() => setChallenging(player)}
                 onAccept={(challengeId) => send({ type: "accept_challenge", challenge_id: challengeId })}

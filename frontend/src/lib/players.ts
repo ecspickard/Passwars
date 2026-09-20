@@ -34,12 +34,14 @@ export function serviceMatches(service: string, query: string): boolean {
 
 export function filterAndSortPlayers(
   players: Player[],
-  { service, sort }: { service: string; sort: PlayerSort },
+  { query, onlyLinked, sort }: { query: string; onlyLinked: boolean; sort: PlayerSort },
 ): Player[] {
-  const q = service.trim();
-  const filtered = q
-    ? players.filter((p) => p.services.some((s) => serviceMatches(s, q)))
-    : [...players];
+  const q = query.trim().toLowerCase();
+  const filtered = players.filter((p) => {
+    if (onlyLinked && !p.chess_username) return false;
+    if (!q) return true;
+    return p.username.toLowerCase().includes(q) || p.services.some((s) => s.toLowerCase().includes(q));
+  });
 
   const byName = (a: Player, b: Player) =>
     a.username.localeCompare(b.username, undefined, { sensitivity: "base" });

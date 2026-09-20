@@ -19,16 +19,18 @@ export function ToastStack() {
 
   return (
     <div className="fixed bottom-4 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
-      {toasts.map((toast) => (
-        <div
-          key={toast.id}
-          role="status"
-          className={`panel flex items-start gap-3 border-l-4 px-4 py-3 shadow-lg shadow-black/40 ${VARIANT_STYLES[toast.variant]}`}
-        >
-          <span className="mt-0.5 text-gold-400" aria-hidden>
-            {VARIANT_ICON[toast.variant]}
-          </span>
-          <p className="flex-1 text-sm leading-snug">{toast.message}</p>
+      {toasts.map((toast) => {
+        const isMac = typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('mac');
+        return (
+          <div
+            key={toast.id}
+            role="status"
+            className={`panel flex items-start gap-3 border-l-4 px-4 py-3 shadow-lg shadow-black/40 ${VARIANT_STYLES[toast.variant]}`}
+          >
+            <span className={`text-gold-400 ${isMac ? '-translate-y-0.5 inline-block' : 'mt-0.5'}`} aria-hidden>
+              {VARIANT_ICON[toast.variant]}
+            </span>
+            <p className={`flex-1 text-sm leading-snug ${isMac ? 'mt-0.5' : ''}`}>{toast.message}</p>
           <button
             onClick={() => dismissToast(toast.id)}
             className="text-steel-400 hover:text-parchment-50"
@@ -37,7 +39,8 @@ export function ToastStack() {
             ×
           </button>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
