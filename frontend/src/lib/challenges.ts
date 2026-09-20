@@ -8,11 +8,12 @@ export interface ChallengeRecord {
   id: number;
   challenger_id: number;
   defender_id: number;
-  /** Only filled in by GET /challenges/mine; null/empty on GET /challenges/{id}. */
+  /** Only filled in by GET /challenges/mine or /recent; null/empty on GET /challenges/{id}. */
   challenger_name: string;
+  defender_name: string | null;
   challenger_service: string;
   defender_service: string;
-  /** "pending" | "accepted" | "completed" | "rejected" | "expired" | "void" */
+  /** "pending" | "accepted" | "completed" | "rejected" | "expired" | "void" | "draw" */
   status: string;
   accepted_at: string | null;
   // Present on GET /challenges/{id} (ChallengeResponse in schemas.py).
@@ -24,6 +25,8 @@ export interface ChallengeRecord {
 /** Needs the GET /api/challenges/mine route (see PROMPT6_BACKEND_CHANGES.md).
  * Returns only the current user's pending and accepted challenges. */
 export const listMyChallenges = () => api.get<ChallengeRecord[]>("/challenges/mine");
+
+export const fetchRecentChallenges = () => api.get<ChallengeRecord[]>("/challenges/recent");
 
 /** Any challenge the current user is part of, whatever its status. */
 export const getChallenge = (id: number) => api.get<ChallengeRecord>(`/challenges/${id}`);

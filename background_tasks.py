@@ -40,6 +40,24 @@ async def _check_challenge(db, challenge: Challenge):
     if not result:
         return
 
+    outcome = result.get("outcome")
+    
+    if outcome == "aborted":
+        challenge.status = "void"
+        db.commit()
+        for uid in (challenge.challenger_id, challenge.defender_id):
+            await manager.send_to_user(uid, {"type": "challenge_voided", "challenge_id": challenge.id})
+        return
+        
+    if outcome == "draw":
+        challenge.status = "draw"
+        challenge.completed_at = datetime.utcnow()
+        db.commit()
+        for uid in (challenge.challenger_id, challenge.defender_id):
+            # Send game_ended so UI refreshes, but without a winner
+            await manager.send_to_user(uid, {"type": "game_ended", "challenge_id": challenge.id, "source": "auto"})
+        return
+
     winner_username = result["winner_username"].lower()
     winner_id = (
         challenger.id if winner_username == challenger.chess_username.lower() else defender.id

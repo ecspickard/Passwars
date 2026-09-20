@@ -22,9 +22,27 @@ export function MatchOutcome({ challenge, meId, challengerName, defenderName }: 
         <span className="font-display text-3xl text-steel-400" aria-hidden>
           ♟
         </span>
-        <h2 className="font-display text-2xl text-parchment-50">Drawn game, challenge voided</h2>
+        <h2 className="font-display text-2xl text-parchment-50">Match aborted, challenge cancelled</h2>
         <p className="max-w-md text-sm text-steel-400">
-          Neither service changed hands. Both vaults are exactly as they were.
+          The match was abandoned before it began. Both vaults are exactly as they were.
+        </p>
+        {source && <p className="text-xs text-steel-500">{source}</p>}
+        <Link to="/challenges" className="btn-gold mt-2">
+          Back to the Challenge Arena
+        </Link>
+      </div>
+    );
+  }
+
+  if (challenge.status === "draw") {
+    return (
+      <div className="panel flex flex-col items-center gap-3 p-8 text-center" role="status">
+        <span className="font-display text-4xl text-steel-400" aria-hidden>
+          🤝
+        </span>
+        <h2 className="font-display text-2xl text-parchment-50">Match drawn</h2>
+        <p className="max-w-md text-sm text-steel-400">
+          A hard-fought draw. Neither service changed hands. Both vaults are exactly as they were.
         </p>
         {source && <p className="text-xs text-steel-500">{source}</p>}
         <Link to="/challenges" className="btn-gold mt-2">

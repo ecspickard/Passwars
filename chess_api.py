@@ -124,15 +124,21 @@ def find_game_result(challenger_username: str, defender_username: str, since: da
 
             if white.get("result") == "win":
                 winner_username = white_username
+                outcome = "win"
             elif black.get("result") == "win":
                 winner_username = black_username
+                outcome = "win"
+            elif white.get("result") in ("abandoned", "aborted"):
+                winner_username = None
+                outcome = "aborted"
             else:
-                # Draw, abandonment, or another non-decisive result - can't
-                # auto-resolve a wager on this, so skip it.
-                continue
+                # Everything else (agreed, repetition, stalemate, etc.)
+                winner_username = None
+                outcome = "draw"
 
             matches.append({
                 "winner_username": winner_username,
+                "outcome": outcome,
                 "end_time": end_time,
                 "url": game.get("url"),
             })

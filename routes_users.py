@@ -4,7 +4,7 @@ from sqlalchemy import func, exc
 from typing import List
 from pydantic import BaseModel
 from database import get_db
-from models import User, UserPassword, PasswordBank, PasswordAuditLog
+from models import User, UserPassword, PasswordBank, PasswordAuditLog, Challenge
 from schemas import (
     PasswordAddRequest, PasswordUpdateRequest, PasswordResponse, PasswordBankResponse,
     PlayerResponse, LeaderboardResponse, UserResponse, UserProfileUpdateRequest,
@@ -105,6 +105,20 @@ def update_password(
     pwd = db.query(UserPassword).filter(UserPassword.id == password_id, UserPassword.user_id == current_user.id).first()
     if not pwd:
         raise HTTPException(status_code=404, detail="Password not found")
+        
+    active_challenge = db.query(Challenge).filter(
+        (Challenge.challenger_id == current_user.id) | (Challenge.defender_id == current_user.id),
+        Challenge.status.in_(["pending", "accepted"])
+    ).filter(
+        ((Challenge.challenger_id == current_user.id) & (Challenge.challenger_service == pwd.service_name)) |
+        ((Challenge.defender_id == current_user.id) & (Challenge.defender_service == pwd.service_name))
+    ).first()
+    
+    if active_challenge:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot modify a password that is currently staked in an active challenge."
+        )
     
     if request.service_name is not None:
         pwd.service_name = request.service_name
@@ -137,6 +151,21 @@ def delete_password(
     pwd = db.query(UserPassword).filter(UserPassword.id == password_id, UserPassword.user_id == current_user.id).first()
     if not pwd:
         raise HTTPException(status_code=404, detail="Password not found")
+        
+    active_challenge = db.query(Challenge).filter(
+        (Challenge.challenger_id == current_user.id) | (Challenge.defender_id == current_user.id),
+        Challenge.status.in_(["pending", "accepted"])
+    ).filter(
+        ((Challenge.challenger_id == current_user.id) & (Challenge.challenger_service == pwd.service_name)) |
+        ((Challenge.defender_id == current_user.id) & (Challenge.defender_service == pwd.service_name))
+    ).first()
+    
+    if active_challenge:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete a password that is currently staked in an active challenge."
+        )
+        
     db.delete(pwd)
     db.commit()
     return None

@@ -26,6 +26,7 @@ const STATUS_LABEL: Record<string, { text: string; className: string }> = {
   pending: { text: "Awaiting reply", className: "border-gold-500/40 text-gold-400" },
   accepted: { text: "In progress", className: "border-gold-500 text-gold-400" },
   completed: { text: "Resolved", className: "border-felt-500 text-felt-500" },
+  draw: { text: "Draw", className: "border-steel-500 text-steel-400" },
   void: { text: "Voided", className: "border-steel-500 text-steel-400" },
   rejected: { text: "Declined", className: "border-signal-500 text-signal-500" },
   expired: { text: "Expired", className: "border-steel-500 text-steel-400" },
@@ -225,6 +226,7 @@ export default function ChallengeDetail() {
 
     case "completed":
     case "void":
+    case "draw":
       body = (
         <MatchOutcome
           challenge={challenge}

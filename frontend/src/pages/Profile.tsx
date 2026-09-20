@@ -5,11 +5,16 @@ import { useAuth } from "../context/AuthContext";
 import { getRankForUser, type RankInfo } from "../lib/leaderboard";
 import { getUserProfile, type UserProfile } from "../lib/profile";
 
-const MEDAL: Record<number, string> = { 1: "🥇", 2: "🥈", 3: "🥉" };
+const CHESS_RANK: Record<number, { icon: string; className: string }> = {
+  1: { icon: "♔", className: "text-gold-400 drop-shadow-sm inline-block" },
+  2: { icon: "♕", className: "text-gold-400 inline-block" },
+  3: { icon: "♗", className: "text-gold-500 inline-block" },
+};
 
 export default function Profile() {
   const { id } = useParams<{ id: string }>();
   const { user: viewer } = useAuth();
+  const isMac = typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('mac');
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -138,9 +143,14 @@ export default function Profile() {
       {!rankLoading && rank && (
         <section className="panel flex flex-wrap items-center justify-between gap-4 p-5">
           <div className="flex items-center gap-3">
-            <span className="font-display text-3xl text-gold-400" aria-hidden>
-              {MEDAL[rank.rank] ?? `#${rank.rank}`}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="font-ui text-2xl text-steel-400">#{rank.rank}</span>
+              {CHESS_RANK[rank.rank] && (
+                <span className={`font-display text-4xl ${CHESS_RANK[rank.rank].className} ${isMac ? '-translate-y-[5px]' : 'translate-y-px'}`} aria-hidden>
+                  {CHESS_RANK[rank.rank].icon}
+                </span>
+              )}
+            </div>
             <div>
               <p className="font-display text-lg text-parchment-50">
                 Rank {rank.rank} of {rank.totalPlayers}

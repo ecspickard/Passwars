@@ -126,6 +126,7 @@ class ChallengeResponse(BaseModel):
     accepted_at: Optional[datetime] = None
     result_source: Optional[str] = None
     challenger_name: Optional[str] = None
+    defender_name: Optional[str] = None
 
     class Config:
         from_attributes = True
