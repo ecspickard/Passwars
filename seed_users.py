@@ -148,11 +148,15 @@ def seed(count):
         # 1. Users and their vault entries (offerings)
         users = []
         for name in make_usernames(count):
-            if db.query(User).filter(User.username == name).first():
+            email = f"{name.lower()}{SEED_DOMAIN}"
+            if db.query(User).filter(
+                (User.username == name) | (User.email == email)
+            ).first():
                 continue
+
             user = User(
                 username=name,
-                email=f"{name.lower()}{SEED_DOMAIN}",
+                email=email,
                 password_hash=shared_hash,
                 created_at=now - timedelta(days=random.randint(1, 90),
                                            hours=random.randint(0, 23)),
@@ -160,10 +164,10 @@ def seed(count):
             db.add(user)
             db.flush()  # assigns user.id
 
-	picks = set(random.sample(POPULAR, random.randint(1, 2)))
-	picks.update(random.sample(SERVICES, random.randint(1, 3)))
-	for service in picks:
-		first = random.choice(FIRST)
+            picks = set(random.sample(POPULAR, random.randint(1, 2)))
+            picks.update(random.sample(SERVICES, random.randint(1, 3)))
+            for service in picks:
+                first = random.choice(FIRST)
                 account = random.choice([
                     f"{name.lower()}@gmail.com",
                     f"{first}{random.randint(1, 99)}@outlook.com",
@@ -178,7 +182,8 @@ def seed(count):
                     service_name=service,
                     secret_value=encrypt_password(secret),
                 ))
-            users.append(user)
+
+            users.append(user)   # once per user, after their services
         db.commit()
         print(f"Created {len(users)} users")
 
