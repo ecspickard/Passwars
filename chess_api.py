@@ -16,7 +16,7 @@ challenger's monthly game archives for a decisive, completed game against the
 defender that finished at or after the challenge's `accepted_at` timestamp.
 """
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 CHESS_API_BASE = "https://api.chess.com/pub"
@@ -99,24 +99,36 @@ def find_game_result(expected_white_username: str, expected_black_username: str,
     if since.tzinfo is None:
         since = since.replace(tzinfo=timezone.utc)
 
+    # 60-second grace window to handle clock drift between servers
+    since_with_grace = since - timedelta(seconds=60)
+
     expected_white = expected_white_username.lower()
     expected_black = expected_black_username.lower()
 
     matches = []
-    # Both players' archives should have the game; searching just White's archive is sufficient.
-    for url in _archive_urls_since(expected_white_username, since):
+    seen_urls = set()
+    archive_urls = set(
+        _archive_urls_since(expected_white_username, since_with_grace)
+        + _archive_urls_since(expected_black_username, since_with_grace)
+    )
+
+    for url in archive_urls:
         resp = requests.get(url, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT + 5)
         if resp.status_code != 200:
             continue
 
         for game in resp.json().get("games", []):
+            game_url = game.get("url")
+            if game_url and game_url in seen_urls:
+                continue
+            if game_url:
+                seen_urls.add(game_url)
+
             end_time = datetime.fromtimestamp(game.get("end_time", 0), tz=timezone.utc)
-            if end_time < since:
+            if end_time < since_with_grace:
                 continue
 
-            # Enforce Fair Play Rules
-            if not game.get("rated"):
-                continue
+            # Enforce Fair Play Rules (rated or unrated both count)
             if game.get("rules") != "chess":
                 continue
             if game.get("time_class") not in ("blitz", "rapid"):
@@ -130,13 +142,16 @@ def find_game_result(expected_white_username: str, expected_black_username: str,
             if white_username != expected_white or black_username != expected_black:
                 continue
 
-            if white.get("result") == "win":
+            white_result = white.get("result")
+            black_result = black.get("result")
+
+            if white_result == "win":
                 winner_username = white_username
                 outcome = "win"
-            elif black.get("result") == "win":
+            elif black_result == "win":
                 winner_username = black_username
                 outcome = "win"
-            elif white.get("result") in ("abandoned", "aborted"):
+            elif white_result in ("abandoned", "aborted") or black_result in ("abandoned", "aborted"):
                 winner_username = None
                 outcome = "aborted"
             else:
@@ -148,7 +163,7 @@ def find_game_result(expected_white_username: str, expected_black_username: str,
                 "winner_username": winner_username,
                 "outcome": outcome,
                 "end_time": end_time,
-                "url": game.get("url"),
+                "url": game_url,
             })
 
     if not matches:

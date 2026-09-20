@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { POLL_INTERVAL_MS, useAutoResolve } from "../hooks/useAutoResolve";
+import { useAutoResolve } from "../hooks/useAutoResolve";
 import { useWebSocket, useWebSocketEvent, type WsEvent } from "../hooks/useWebSocket";
-import type { ChallengeRecord } from "../lib/challenges";
+import { checkChallengeGame, type ChallengeRecord } from "../lib/challenges";
 import { parseServerTimestamp, type FoundResult } from "../lib/chessMatch";
 import { ResultReportPanel, type ReportChoice } from "./ResultReportPanel";
 
@@ -38,7 +38,31 @@ export function MatchInProgress({
   const [showManual, setShowManual] = useState(false);
   const [stalled, setStalled] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(true);
+  const [isCheckingApi, setIsCheckingApi] = useState(false);
+  const [apiCheckMessage, setApiCheckMessage] = useState<string | null>(null);
   const finalizedRef = useRef(false);
+
+  const handleManualCheck = async () => {
+    setIsCheckingApi(true);
+    setApiCheckMessage(null);
+    try {
+      const res = await checkChallengeGame(challenge.id);
+      if (res.status === "resolved") {
+        setApiCheckMessage(res.message || "Match resolved on Chess.com!");
+        onRefresh();
+      } else if (res.status === "not_found") {
+        setApiCheckMessage(res.message || "No finished game found on Chess.com yet.");
+      } else {
+        setApiCheckMessage(res.message || "Challenge status updated.");
+        onRefresh();
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to check Chess.com.";
+      setApiCheckMessage(msg);
+    } finally {
+      setIsCheckingApi(false);
+    }
+  };
 
   const challengerIsWhite = challenge.id % 2 === 0;
   const expectedWhite = challengerIsWhite ? challengerChess : defenderChess;
@@ -116,7 +140,7 @@ export function MatchInProgress({
           <h2 className="font-display text-lg text-parchment-50">Play the match on Chess.com</h2>
           <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-steel-400">
             <li>
-              Open Chess.com and start a <strong className="text-parchment-100">Rated Blitz or Rapid</strong> game against{" "}
+              Open Chess.com and start a <strong className="text-parchment-100">Blitz or Rapid</strong> game against{" "}
               <span className="text-parchment-100">{opponentName}</span>
               {opponentChess && (
                 <>
@@ -143,7 +167,27 @@ export function MatchInProgress({
               Open {opponentName}&rsquo;s Chess.com profile
             </a>
           )}
+          <button
+            type="button"
+            disabled={isCheckingApi}
+            onClick={handleManualCheck}
+            className="btn-ghost flex items-center gap-1.5"
+          >
+            {isCheckingApi ? (
+              <>
+                <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                Checking Chess.com…
+              </>
+            ) : (
+              "Check Chess.com Now"
+            )}
+          </button>
         </div>
+        {apiCheckMessage && (
+          <p className="rounded bg-black/30 px-3 py-2 text-xs text-parchment-200 border border-steel-700">
+            {apiCheckMessage}
+          </p>
+        )}
         <p className="text-xs text-steel-500">
           Chess.com doesn&rsquo;t guarantee a pre-filled challenge for every opponent. If the link doesn&rsquo;t
           land on a new game against {opponentName}, send the challenge from their profile instead.
@@ -156,6 +200,8 @@ export function MatchInProgress({
         stalled={stalled}
         missingAcceptTime={sinceMs === null}
         onRetry={restart}
+        onCheckNow={handleManualCheck}
+        isChecking={isCheckingApi}
       />
 
       {manualVisible ? (
@@ -187,7 +233,7 @@ export function MatchInProgress({
             <h2 className="font-display text-2xl text-parchment-50">Match Rules & Color Assignment</h2>
             <div className="text-left space-y-4 text-sm text-steel-300">
               <p>
-                <strong>1. Format:</strong> You must play a <strong className="text-parchment-100">Rated Blitz or Rapid</strong> game on Chess.com.
+                <strong>1. Format:</strong> You must play a <strong className="text-parchment-100">Blitz or Rapid</strong> game on Chess.com.
               </p>
               <p>
                 <strong>2. Your Color:</strong> The server has randomly assigned you to play as <strong className="text-parchment-100">{myColor}</strong>. Your opponent {opponentName} must play as {opponentColor}.
@@ -216,12 +262,16 @@ function AutoStatus({
   stalled,
   missingAcceptTime,
   onRetry,
+  onCheckNow,
+  isChecking,
 }: {
   phase: ReturnType<typeof useAutoResolve>["phase"];
   lastCheckedAt: number | null;
   stalled: boolean;
   missingAcceptTime: boolean;
   onRetry: () => void;
+  onCheckNow?: () => void;
+  isChecking?: boolean;
 }) {
   const box = "panel flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm";
 
@@ -244,9 +294,21 @@ function AutoStatus({
           <span className="h-2 w-2 animate-pulse rounded-full bg-gold-400" aria-hidden />
           Watching Chess.com for your game (results can take up to a minute to appear)
         </p>
-        {lastCheckedAt && (
-          <p className="text-xs text-steel-500">Last checked {new Date(lastCheckedAt).toLocaleTimeString()}</p>
-        )}
+        <div className="flex items-center gap-3">
+          {lastCheckedAt && (
+            <p className="text-xs text-steel-500">Last checked {new Date(lastCheckedAt).toLocaleTimeString()}</p>
+          )}
+          {onCheckNow && (
+            <button
+              type="button"
+              disabled={isChecking}
+              onClick={onCheckNow}
+              className="text-xs text-steel-400 underline hover:text-parchment-100 disabled:opacity-50"
+            >
+              {isChecking ? "Checking…" : "Check now"}
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -272,9 +334,21 @@ function AutoStatus({
           : "No finished game turned up in the last few minutes."}{" "}
         Report the result below, or check again.
       </p>
-      <button type="button" className="btn-ghost text-xs" onClick={onRetry}>
-        Check again
-      </button>
+      <div className="flex items-center gap-2">
+        {onCheckNow && (
+          <button
+            type="button"
+            disabled={isChecking}
+            onClick={onCheckNow}
+            className="btn-gold text-xs"
+          >
+            {isChecking ? "Checking Chess.com…" : "Check Chess.com now"}
+          </button>
+        )}
+        <button type="button" className="btn-ghost text-xs" onClick={onRetry}>
+          Check again
+        </button>
+      </div>
     </div>
   );
 }

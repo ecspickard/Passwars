@@ -100,8 +100,11 @@ export async function findMatchResult(
   const whitePlayer = expectedWhiteUsername.toLowerCase();
   const blackPlayer = expectedBlackUsername.toLowerCase();
 
+  const effectiveSinceMs = sinceMs - 60_000;
+
   const settled = await Promise.allSettled([
-    gamesFor(whitePlayer, sinceMs, signal),
+    gamesFor(whitePlayer, effectiveSinceMs, signal),
+    gamesFor(blackPlayer, effectiveSinceMs, signal),
   ]);
 
   if (settled.every((s) => s.status === "rejected")) {
@@ -115,10 +118,9 @@ export async function findMatchResult(
 
   for (const game of games) {
     const endMs = (game.end_time ?? 0) * 1000;
-    if (endMs < sinceMs) continue;
+    if (endMs < effectiveSinceMs) continue;
 
-    // Enforce Fair Play Rules
-    if (!game.rated) continue;
+    // Enforce Fair Play Rules (rated or unrated both count)
     if (game.rules !== "chess") continue;
     if (game.time_class !== "blitz" && game.time_class !== "rapid") continue;
 
@@ -131,12 +133,15 @@ export async function findMatchResult(
     if (seen.has(key)) continue;
     seen.add(key);
 
+    const whiteResult = game.white?.result ?? "";
+    const blackResult = game.black?.result ?? "";
+
     let found: FoundResult | null = null;
-    if (game.white?.result === "win") {
+    if (whiteResult === "win") {
       found = { kind: "decisive", winnerUsername: white, endTime: endMs, url: game.url };
-    } else if (game.black?.result === "win") {
+    } else if (blackResult === "win") {
       found = { kind: "decisive", winnerUsername: black, endTime: endMs, url: game.url };
-    } else if (DRAW_RESULTS.has(game.white?.result ?? "") && DRAW_RESULTS.has(game.black?.result ?? "")) {
+    } else if (DRAW_RESULTS.has(whiteResult) || DRAW_RESULTS.has(blackResult)) {
       found = { kind: "draw", endTime: endMs, url: game.url };
     }
     // Anything else (e.g. abandoned with no winner) isn't a usable result.

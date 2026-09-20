@@ -3,11 +3,15 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from starlette.concurrency import run_in_threadpool
 from typing import List
 from database import get_db
 from models import Challenge, User
 from schemas import ChallengeResponse
 from routes_users import get_current_user
+from chess_api import find_game_result
+from challenge_service import complete_challenge
+from connection_manager import manager
 
 router = APIRouter(prefix="/api/challenges", tags=["challenges"])
 
@@ -159,3 +163,157 @@ def deny_challenge(
     db.refresh(challenge)
 
     return _to_response(challenge)
+
+
+@router.post("/{challenge_id}/check-game")
+async def check_challenge_game(
+    challenge_id: int,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Manually trigger an API check against Chess.com for this challenge.
+    Searches both rated and unrated games, detects wins, losses, and draws.
+    """
+    current_user = get_current_user(authorization, db)
+
+    challenge = db.query(Challenge).filter(Challenge.id == challenge_id).first()
+    if not challenge:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Challenge not found"
+        )
+
+    if challenge.challenger_id != current_user.id and challenge.defender_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
+    # If already resolved:
+    if challenge.status in ["completed", "draw", "void", "rejected", "expired"]:
+        return {
+            "status": "already_resolved",
+            "challenge_status": challenge.status,
+            "winner_id": challenge.winner_id,
+            "message": f"Challenge is already {challenge.status}."
+        }
+
+    if challenge.status != "accepted":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Challenge is in status '{challenge.status}'. Only 'accepted' challenges can be checked on Chess.com."
+        )
+
+    challenger = challenge.challenger
+    defender = challenge.defender
+
+    if not challenger.chess_username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Challenger does not have a linked Chess.com username."
+        )
+    if not defender.chess_username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Defender does not have a linked Chess.com username."
+        )
+
+    if challenge.id % 2 == 0:
+        expected_white = challenger.chess_username
+        expected_black = defender.chess_username
+    else:
+        expected_white = defender.chess_username
+        expected_black = challenger.chess_username
+
+    result = await run_in_threadpool(
+        find_game_result,
+        expected_white,
+        expected_black,
+        challenge.accepted_at or challenge.created_at,
+    )
+
+    if not result:
+        return {
+            "status": "not_found",
+            "message": f"No finished game found on Chess.com yet between @{expected_white} (White) and @{expected_black} (Black) after {challenge.accepted_at} UTC.",
+            "searched_players": [expected_white, expected_black],
+            "since": str(challenge.accepted_at),
+        }
+
+    ids = (challenge.challenger_id, challenge.defender_id)
+    outcome = result.get("outcome")
+
+    if outcome == "aborted":
+        challenge.status = "void"
+        challenge.completed_at = datetime.utcnow()
+        challenge.result_source = "auto"
+        db.commit()
+        for uid in ids:
+            await manager.send_to_user(
+                uid,
+                {
+                    "type": "challenge_voided",
+                    "challenge_id": challenge.id,
+                    "source": "auto",
+                },
+            )
+        return {
+            "status": "resolved",
+            "outcome": "aborted",
+            "message": "Game was aborted on Chess.com. Challenge cancelled.",
+            "url": result.get("url"),
+            "end_time": str(result.get("end_time")),
+        }
+
+    if outcome == "draw":
+        challenge.status = "draw"
+        challenge.completed_at = datetime.utcnow()
+        challenge.result_source = "auto"
+        db.commit()
+        for uid in ids:
+            await manager.send_to_user(
+                uid,
+                {
+                    "type": "game_ended",
+                    "challenge_id": challenge.id,
+                    "source": "auto",
+                },
+            )
+        return {
+            "status": "resolved",
+            "outcome": "draw",
+            "message": "Draw detected on Chess.com! Match resolved as a draw.",
+            "url": result.get("url"),
+            "end_time": str(result.get("end_time")),
+        }
+
+    winner_username = (result["winner_username"] or "").lower()
+    verified_winner = (
+        challenger
+        if winner_username == challenger.chess_username.lower()
+        else defender
+    )
+
+    complete_challenge(db, challenge, verified_winner.id, source="auto")
+
+    for uid in ids:
+        await manager.send_to_user(
+            uid,
+            {
+                "type": "game_ended",
+                "challenge_id": challenge.id,
+                "winner_id": verified_winner.id,
+                "source": "auto",
+            },
+        )
+
+    return {
+        "status": "resolved",
+        "outcome": "win",
+        "winner_id": verified_winner.id,
+        "winner_username": result["winner_username"],
+        "message": f"Game finished on Chess.com! Winner: @{result['winner_username']}.",
+        "url": result.get("url"),
+        "end_time": str(result.get("end_time")),
+    }

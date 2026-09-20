@@ -31,6 +31,19 @@ export const fetchRecentChallenges = () => api.get<ChallengeRecord[]>("/challeng
 /** Any challenge the current user is part of, whatever its status. */
 export const getChallenge = (id: number) => api.get<ChallengeRecord>(`/challenges/${id}`);
 
+export interface CheckGameResult {
+  status: "resolved" | "not_found" | "already_resolved";
+  outcome?: "win" | "draw";
+  winner_id?: number;
+  winner_username?: string;
+  message?: string;
+  url?: string;
+}
+
+/** Manually triggers an API check on Chess.com for this challenge. */
+export const checkChallengeGame = (id: number) =>
+  api.post<CheckGameResult>(`/challenges/${id}/check-game`);
+
 export interface Participant {
   id: number;
   username: string;
