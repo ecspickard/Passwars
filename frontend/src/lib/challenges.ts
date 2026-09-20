@@ -13,7 +13,7 @@ export interface ChallengeRecord {
   defender_name: string | null;
   challenger_service: string;
   defender_service: string;
-  /** "pending" | "accepted" | "completed" | "rejected" | "expired" | "void" */
+  /** "pending" | "accepted" | "completed" | "rejected" | "expired" | "void" | "draw" */
   status: string;
   accepted_at: string | null;
   // Present on GET /challenges/{id} (ChallengeResponse in schemas.py).
