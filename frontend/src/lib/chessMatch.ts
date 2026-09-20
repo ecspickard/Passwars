@@ -50,6 +50,9 @@ interface ChessGame {
   end_time?: number;
   white?: { username?: string; result?: string };
   black?: { username?: string; result?: string };
+  rated?: boolean;
+  rules?: string;
+  time_class?: string;
 }
 
 async function getJson<T>(url: string, signal?: AbortSignal): Promise<T | null> {
@@ -89,17 +92,16 @@ async function gamesFor(username: string, sinceMs: number, signal?: AbortSignal)
  * Throws ChessApiError only if Chess.com couldn't be reached for *both* players.
  */
 export async function findMatchResult(
-  challengerUsername: string,
-  defenderUsername: string,
+  expectedWhiteUsername: string,
+  expectedBlackUsername: string,
   sinceMs: number,
   signal?: AbortSignal,
 ): Promise<MatchResult> {
-  const a = challengerUsername.toLowerCase();
-  const b = defenderUsername.toLowerCase();
+  const whitePlayer = expectedWhiteUsername.toLowerCase();
+  const blackPlayer = expectedBlackUsername.toLowerCase();
 
   const settled = await Promise.allSettled([
-    gamesFor(a, sinceMs, signal),
-    gamesFor(b, sinceMs, signal),
+    gamesFor(whitePlayer, sinceMs, signal),
   ]);
 
   if (settled.every((s) => s.status === "rejected")) {
@@ -115,9 +117,14 @@ export async function findMatchResult(
     const endMs = (game.end_time ?? 0) * 1000;
     if (endMs < sinceMs) continue;
 
+    // Enforce Fair Play Rules
+    if (!game.rated) continue;
+    if (game.rules !== "chess") continue;
+    if (game.time_class !== "blitz" && game.time_class !== "rapid") continue;
+
     const white = (game.white?.username ?? "").toLowerCase();
     const black = (game.black?.username ?? "").toLowerCase();
-    if (!((white === a && black === b) || (white === b && black === a))) continue;
+    if (white !== whitePlayer || black !== blackPlayer) continue;
 
     // Both players' archives contain the same game; count it once.
     const key = game.url ?? `${endMs}-${white}-${black}`;

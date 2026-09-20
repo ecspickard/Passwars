@@ -44,13 +44,24 @@ def complete_challenge(db: Session, challenge: Challenge, winner_id: int, source
             "cannot transfer secret"
         )
 
-    password_bank = PasswordBank(
-        user_id=winner_id,
-        service_name=loser_service,
-        secret_value=loser_offering.secret_value,
-        collected_from=loser_id
-    )
-    db.add(password_bank)
+    password_bank = db.query(PasswordBank).filter(
+        PasswordBank.user_id == winner_id,
+        PasswordBank.service_name == loser_service,
+        PasswordBank.collected_from == loser_id
+    ).first()
+
+    if password_bank:
+        password_bank.secret_value = loser_offering.secret_value
+        password_bank.collected_from = loser_id
+        password_bank.collected_at = datetime.utcnow()
+    else:
+        password_bank = PasswordBank(
+            user_id=winner_id,
+            service_name=loser_service,
+            secret_value=loser_offering.secret_value,
+            collected_from=loser_id
+        )
+        db.add(password_bank)
 
     challenge.winner_id = winner_id
     challenge.status = "completed"

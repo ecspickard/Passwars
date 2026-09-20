@@ -37,9 +37,9 @@ export function MatchOutcome({ challenge, meId, challengerName, defenderName }: 
   if (challenge.status === "draw") {
     return (
       <div className="panel flex flex-col items-center gap-3 p-8 text-center" role="status">
-        <span className="font-display text-4xl text-steel-400" aria-hidden>
-          🤝
-        </span>
+        <div className="font-display text-4xl text-white" aria-hidden>
+          ½-½
+        </div>
         <h2 className="font-display text-2xl text-parchment-50">Match drawn</h2>
         <p className="max-w-md text-sm text-steel-400">
           A hard-fought draw. Neither service changed hands. Both vaults are exactly as they were.
@@ -81,8 +81,8 @@ export function MatchOutcome({ challenge, meId, challengerName, defenderName }: 
       className={`panel flex flex-col items-center gap-3 p-8 text-center ${iWon ? "border-felt-500" : ""}`}
       role="status"
     >
-      <span className={`font-display text-4xl ${iWon ? "text-gold-400" : "text-steel-400"}`} aria-hidden>
-        {iWon ? "♛" : "♟"}
+      <span className={`font-display text-5xl ${iWon ? "text-gold-400 drop-shadow-sm" : "text-white"}`} aria-hidden>
+        {iWon ? "♔" : "♟"}
       </span>
       <h2 className="font-display text-2xl text-parchment-50">{heading}</h2>
       <p className="max-w-md text-sm text-steel-400">{detail}</p>

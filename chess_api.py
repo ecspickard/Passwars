@@ -87,24 +87,24 @@ def _archive_urls_since(username: str, since: datetime) -> list:
     return [url for url in archives if url[-7:] >= since_key]
 
 
-def find_game_result(challenger_username: str, defender_username: str, since: datetime) -> Optional[dict]:
+def find_game_result(expected_white_username: str, expected_black_username: str, since: datetime) -> Optional[dict]:
     """
     Search Chess.com's public archives for a completed, decisive game between
     the two players that finished at or after `since` (normally the
     challenge's `accepted_at` time). Returns the most recent qualifying
     game's result, or None if nothing matches yet.
 
-    Return shape: {"winner_username": str, "end_time": datetime, "url": str}
+    Return shape: {"winner_username": str, "outcome": str, "end_time": datetime, "url": str}
     """
     if since.tzinfo is None:
         since = since.replace(tzinfo=timezone.utc)
 
-    challenger_lower = challenger_username.lower()
-    defender_lower = defender_username.lower()
-    expected_players = {challenger_lower, defender_lower}
+    expected_white = expected_white_username.lower()
+    expected_black = expected_black_username.lower()
 
     matches = []
-    for url in _archive_urls_since(challenger_username, since):
+    # Both players' archives should have the game; searching just White's archive is sufficient.
+    for url in _archive_urls_since(expected_white_username, since):
         resp = requests.get(url, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT + 5)
         if resp.status_code != 200:
             continue
@@ -114,12 +114,20 @@ def find_game_result(challenger_username: str, defender_username: str, since: da
             if end_time < since:
                 continue
 
+            # Enforce Fair Play Rules
+            if not game.get("rated"):
+                continue
+            if game.get("rules") != "chess":
+                continue
+            if game.get("time_class") not in ("blitz", "rapid"):
+                continue
+
             white = game.get("white", {})
             black = game.get("black", {})
             white_username = (white.get("username") or "").lower()
             black_username = (black.get("username") or "").lower()
 
-            if {white_username, black_username} != expected_players:
+            if white_username != expected_white or black_username != expected_black:
                 continue
 
             if white.get("result") == "win":

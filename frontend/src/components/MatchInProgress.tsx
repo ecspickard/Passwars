@@ -37,11 +37,19 @@ export function MatchInProgress({
   const [mismatch, setMismatch] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [stalled, setStalled] = useState(false);
+  const [showRulesModal, setShowRulesModal] = useState(true);
   const finalizedRef = useRef(false);
 
+  const challengerIsWhite = challenge.id % 2 === 0;
+  const expectedWhite = challengerIsWhite ? challengerChess : defenderChess;
+  const expectedBlack = challengerIsWhite ? defenderChess : challengerChess;
+  const iAmWhite = (iAmChallenger && challengerIsWhite) || (!iAmChallenger && !challengerIsWhite);
+  const myColor = iAmWhite ? "White" : "Black";
+  const opponentColor = iAmWhite ? "Black" : "White";
+
   const { phase, lastCheckedAt, restart } = useAutoResolve({
-    challengerChess,
-    defenderChess,
+    expectedWhite,
+    expectedBlack,
     sinceMs,
     onResult: setAutoResult,
   });
@@ -74,7 +82,7 @@ export function MatchInProgress({
           : challenge.defender_id;
       send({ type: "game_end", challenge_id: challenge.id, winner_id: winnerId, source: "auto" });
     } else {
-      send({ type: "report_result", challenge_id: challenge.id, winner_id: null });
+      send({ type: "game_end", challenge_id: challenge.id, winner_id: null, source: "auto" });
       setSubmitted("draw");
     }
 
@@ -108,7 +116,7 @@ export function MatchInProgress({
           <h2 className="font-display text-lg text-parchment-50">Play the match on Chess.com</h2>
           <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-steel-400">
             <li>
-              Open Chess.com and start a game against{" "}
+              Open Chess.com and start a <strong className="text-parchment-100">Rated Blitz or Rapid</strong> game against{" "}
               <span className="text-parchment-100">{opponentName}</span>
               {opponentChess && (
                 <>
@@ -118,7 +126,10 @@ export function MatchInProgress({
               )}
               . One of you sends the challenge and the other accepts it.
             </li>
-            <li>Play the game to the end. Only games that finish after this challenge was accepted count.</li>
+            <li>
+              <strong className="text-parchment-100">Colors:</strong> You must play as <strong className="text-parchment-100">{myColor}</strong> and {opponentName} must play as <strong className="text-parchment-100">{opponentColor}</strong>.
+            </li>
+            <li>Play the game to the end. Only games that match these rules and finish after this challenge was accepted count.</li>
             <li>We&rsquo;ll spot the finished game and settle the wager. If we can&rsquo;t, report the result below.</li>
           </ol>
         </div>
@@ -166,6 +177,35 @@ export function MatchInProgress({
           Finished but not detected? Report the result yourself
         </button>
       )}
+
+      {showRulesModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/80 p-4 backdrop-blur-sm">
+          <div className="panel max-w-lg w-full p-8 text-center flex flex-col items-center gap-5 shadow-2xl">
+            <div className={`font-display text-7xl drop-shadow-sm ${iAmWhite ? "text-white" : "text-steel-400"}`}>
+              {iAmWhite ? "♟" : "♙"}
+            </div>
+            <h2 className="font-display text-2xl text-parchment-50">Match Rules & Color Assignment</h2>
+            <div className="text-left space-y-4 text-sm text-steel-300">
+              <p>
+                <strong>1. Format:</strong> You must play a <strong className="text-parchment-100">Rated Blitz or Rapid</strong> game on Chess.com.
+              </p>
+              <p>
+                <strong>2. Your Color:</strong> The server has randomly assigned you to play as <strong className="text-parchment-100">{myColor}</strong>. Your opponent {opponentName} must play as {opponentColor}.
+              </p>
+              <p>
+                <strong>3. Detection:</strong> Only games that match these exact parameters and finish after the challenge was accepted will count towards settling the wager.
+              </p>
+            </div>
+            <button 
+              type="button"
+              className="btn-gold mt-4 w-full"
+              onClick={() => setShowRulesModal(false)}
+            >
+              I understand, let's play
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -190,7 +230,7 @@ function AutoStatus({
       <div className={box} role="status">
         <p className="text-parchment-100">
           {stalled
-            ? "Game found, but the server hasn't confirmed it yet. You can report the result below."
+            ? "Game found. Settling the wager…, or you can manually report the result below"
             : "Game found. Settling the wager…"}
         </p>
       </div>
@@ -202,7 +242,7 @@ function AutoStatus({
       <div className={box} role="status">
         <p className="flex items-center gap-2 text-steel-400">
           <span className="h-2 w-2 animate-pulse rounded-full bg-gold-400" aria-hidden />
-          Watching Chess.com for your game (every {POLL_INTERVAL_MS / 1000}s)
+          Watching Chess.com for your game (results can take up to a minute to appear)
         </p>
         {lastCheckedAt && (
           <p className="text-xs text-steel-500">Last checked {new Date(lastCheckedAt).toLocaleTimeString()}</p>

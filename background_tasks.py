@@ -18,6 +18,7 @@ from connection_manager import manager
 
 POLL_INTERVAL_SECONDS = 45
 PENDING_CHALLENGE_TTL = timedelta(hours=1)
+ACCEPTED_CHALLENGE_TTL = timedelta(minutes=30)
 
 
 async def _check_challenge(db, challenge: Challenge):
@@ -29,12 +30,19 @@ async def _check_challenge(db, challenge: Challenge):
     if not defender.chess_username or not defender.chess_verified_at:
         return
 
+    if challenge.id % 2 == 0:
+        expected_white = challenger.chess_username
+        expected_black = defender.chess_username
+    else:
+        expected_white = defender.chess_username
+        expected_black = challenger.chess_username
+
     # find_game_result uses `requests` (blocking) - run it off the event
     # loop so a slow Chess.com response doesn't freeze active websockets.
     result = await run_in_threadpool(
         find_game_result,
-        challenger.chess_username,
-        defender.chess_username,
+        expected_white,
+        expected_black,
         challenge.accepted_at,
     )
     if not result:
@@ -108,6 +116,32 @@ async def _expire_stale_pending_challenges(db):
             )
 
 
+async def _expire_stale_accepted_challenges(db):
+    """Accepted challenges older than 30 minutes auto-expire, so an aborted
+    game doesn't lock the passwords in an 'in progress' state forever."""
+    from sqlalchemy import func
+    cutoff = func.now() - ACCEPTED_CHALLENGE_TTL
+    stale = db.query(Challenge).filter(
+        Challenge.status == "accepted",
+        Challenge.accepted_at < cutoff,
+    ).all()
+
+    for challenge in stale:
+        challenge.status = "void"
+        challenge.result_source = "auto"
+        challenge.completed_at = datetime.utcnow()
+        db.commit()
+
+        for uid in (challenge.challenger_id, challenge.defender_id):
+            await manager.send_to_user(
+                uid,
+                {
+                    "type": "challenge_voided",
+                    "challenge_id": challenge.id,
+                },
+            )
+
+
 async def poll_accepted_challenges():
     """Runs forever: resolves accepted challenges via Chess.com, and expires
     stale pending ones."""
@@ -123,6 +157,7 @@ async def poll_accepted_challenges():
 
             try:
                 await _expire_stale_pending_challenges(db)
+                await _expire_stale_accepted_challenges(db)
             except Exception as e:
                 print(f"[poller] error expiring stale challenges: {e}")
         finally:

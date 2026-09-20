@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { DRAW_POLICY, findMatchResult, type FoundResult } from "../lib/chessMatch";
 
-export const POLL_INTERVAL_MS = 15_000;
+export const POLL_INTERVAL_MS = 10_000;
 /** How long one polling run lasts before we give up and offer manual reporting. */
 export const POLL_WINDOW_MS = 10 * 60_000;
 const MAX_CONSECUTIVE_FAILURES = 3;
@@ -19,14 +19,14 @@ export type AutoPhase =
   | "error";
 
 interface Options {
-  challengerChess?: string | null;
-  defenderChess?: string | null;
+  expectedWhite?: string | null;
+  expectedBlack?: string | null;
   /** Epoch ms of Challenge.accepted_at; games ending before this are ignored. */
   sinceMs: number | null;
   onResult: (result: FoundResult) => void;
 }
 
-export function useAutoResolve({ challengerChess, defenderChess, sinceMs, onResult }: Options) {
+export function useAutoResolve({ expectedWhite, expectedBlack, sinceMs, onResult }: Options) {
   const [state, setState] = useState<Exclude<AutoPhase, "disabled">>("polling");
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
   const [runId, setRunId] = useState(0);
@@ -36,10 +36,10 @@ export function useAutoResolve({ challengerChess, defenderChess, sinceMs, onResu
     onResultRef.current = onResult;
   }, [onResult]);
 
-  const canRun = Boolean(challengerChess && defenderChess && sinceMs !== null);
+  const canRun = Boolean(expectedWhite && expectedBlack && sinceMs !== null);
 
   useEffect(() => {
-    if (!canRun || !challengerChess || !defenderChess || sinceMs === null) return;
+    if (!canRun || !expectedWhite || !expectedBlack || sinceMs === null) return;
 
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -51,7 +51,7 @@ export function useAutoResolve({ challengerChess, defenderChess, sinceMs, onResu
 
     const tick = async () => {
       try {
-        const result = await findMatchResult(challengerChess, defenderChess, sinceMs, controller.signal);
+        const result = await findMatchResult(expectedWhite, expectedBlack, sinceMs, controller.signal);
         if (cancelled) return;
         failures = 0;
         setLastCheckedAt(Date.now());
@@ -86,7 +86,7 @@ export function useAutoResolve({ challengerChess, defenderChess, sinceMs, onResu
       controller.abort();
       if (timer) clearTimeout(timer);
     };
-  }, [canRun, challengerChess, defenderChess, sinceMs, runId]);
+  }, [canRun, expectedWhite, expectedBlack, sinceMs, runId]);
 
   const phase: AutoPhase = canRun ? state : "disabled";
   const restart = () => setRunId((n) => n + 1);

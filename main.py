@@ -19,6 +19,76 @@ from chess_api import find_game_result
 # Initialize database
 init_db()
 
+
+async def _retry_game_end_verification(
+    challenge_id: int,
+    winner_id: Optional[int],
+    expected_white: str,
+    expected_black: str,
+    accepted_at: datetime,
+):
+    """
+    Retries verification every 5 seconds (up to 45 seconds) if Chess.com's API
+    returns a stale cache, instead of forcing the user to wait for the global 45s poller.
+    """
+    for _ in range(9):
+        await asyncio.sleep(5)
+        db = SessionLocal()
+        try:
+            challenge = db.query(Challenge).filter(Challenge.id == challenge_id).first()
+            if not challenge or challenge.status != "accepted":
+                return
+
+            result = await run_in_threadpool(
+                find_game_result, expected_white, expected_black, accepted_at
+            )
+            if not result:
+                continue
+
+            ids = (challenge.challenger_id, challenge.defender_id)
+            outcome = result.get("outcome")
+
+            if outcome == "draw":
+                challenge.status = "draw"
+                challenge.completed_at = datetime.utcnow()
+                db.commit()
+                for uid in ids:
+                    await manager.send_to_user(
+                        uid, {"type": "game_ended", "challenge_id": challenge.id, "source": "auto"}
+                    )
+                pending_reports.pop(challenge.id, None)
+                return
+
+            verified_winner = (
+                challenge.challenger
+                if result["winner_username"].lower() == challenge.challenger.chess_username.lower()
+                else challenge.defender
+            )
+            if verified_winner.id != winner_id:
+                return
+
+            try:
+                complete_challenge(db, challenge, winner_id, source="auto")
+                for uid in ids:
+                    await manager.send_to_user(
+                        uid,
+                        {
+                            "type": "game_ended",
+                            "challenge_id": challenge.id,
+                            "winner_id": winner_id,
+                            "source": "auto",
+                        },
+                    )
+                pending_reports.pop(challenge.id, None)
+                return
+            except ValueError as e:
+                print(f"[ws] retry game_end rejected for challenge {challenge_id}: {e}")
+                return
+
+        finally:
+            db.close()
+
+
 app = FastAPI(title="Passwars API", version="1.0.0")
 
 # CORS middleware
@@ -180,7 +250,7 @@ async def websocket_endpoint(user_id: int, websocket: WebSocket):
                     if not challenge or challenge.status != "accepted":
                         continue
                     ids = (challenge.challenger_id, challenge.defender_id)
-                    if user_id not in ids or winner_id not in ids:
+                    if user_id not in ids or (winner_id is not None and winner_id not in ids):
                         continue
 
                     challenger, defender = challenge.challenger, challenge.defender
@@ -191,13 +261,39 @@ async def websocket_endpoint(user_id: int, websocket: WebSocket):
                     ):
                         continue
 
+                    if challenge.id % 2 == 0:
+                        expected_white = challenger.chess_username
+                        expected_black = defender.chess_username
+                    else:
+                        expected_white = defender.chess_username
+                        expected_black = challenger.chess_username
+
                     result = await run_in_threadpool(
                         find_game_result,
-                        challenger.chess_username,
-                        defender.chess_username,
+                        expected_white,
+                        expected_black,
                         challenge.accepted_at,
                     )
                     if not result:
+                        # Stale cache on Chess.com. Fast-track retry so they don't wait 45s.
+                        asyncio.create_task(
+                            _retry_game_end_verification(
+                                challenge.id, winner_id, expected_white, expected_black, challenge.accepted_at
+                            )
+                        )
+                        continue
+
+                    outcome = result.get("outcome")
+
+                    if outcome == "draw":
+                        challenge.status = "draw"
+                        challenge.completed_at = datetime.utcnow()
+                        db.commit()
+                        for uid in ids:
+                            await manager.send_to_user(
+                                uid, {"type": "game_ended", "challenge_id": challenge.id, "source": "auto"}
+                            )
+                        pending_reports.pop(challenge.id, None)
                         continue
 
                     verified_winner = (
@@ -265,23 +361,23 @@ async def websocket_endpoint(user_id: int, websocket: WebSocket):
                             )
 
                     elif reported is None:
-                        # Agreed draw: void the challenge, nothing transfers.
+                        # Agreed draw: challenge becomes 'draw', nothing transfers.
                         pending_reports.pop(challenge.id, None)
-                        challenge.status = "void"
+                        challenge.status = "draw"
                         challenge.result_source = "self_reported"
                         challenge.completed_at = datetime.utcnow()
                         db.commit()
                         for uid in ids:
                             await manager.send_to_user(
                                 uid,
-                                {"type": "challenge_voided", "challenge_id": challenge.id},
+                                {"type": "game_ended", "challenge_id": challenge.id},
                             )
 
                     else:
                         pending_reports.pop(challenge.id, None)
                         try:
                             complete_challenge(db, challenge, reported, source="self_reported")
-                        except ValueError as e:
+                        except Exception as e:
                             print(f"[ws] report_result failed for challenge {challenge_id}: {e}")
                             continue
                         for uid in ids:

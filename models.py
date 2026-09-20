@@ -56,7 +56,7 @@ class PasswordBank(Base):
     collected_from = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     collected_at = Column(DateTime, server_default=func.now())
 
-    __table_args__ = (UniqueConstraint('user_id', 'service_name', name='unique_user_collected_service'),)
+    __table_args__ = (UniqueConstraint('user_id', 'service_name', 'collected_from', name='unique_user_collected_service'),)
 
     user = relationship("User", back_populates="password_bank", foreign_keys=[user_id])
 
